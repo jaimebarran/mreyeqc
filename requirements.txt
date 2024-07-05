@@ -31,4 +31,5 @@ tensorflow==2.5.0
 torchvision==0.14.0
 xgboost==1.7.5
 fetal_brain_utils @ git+https://github.com/Medical-Image-Analysis-Laboratory/fetal_brain_utils@main
+fetal_brain_qc @ git+https://github.com/Medical-Image-Analysis-Laboratory/fetmrqc@main
 MONAIfbs @ git+https://github.com/t-sanchez/MONAIfbs@main
