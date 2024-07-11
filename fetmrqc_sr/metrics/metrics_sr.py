@@ -14,6 +14,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import pdb
 import numpy as np
 import nibabel as ni
 import skimage
@@ -50,12 +51,36 @@ from .mriqc_metrics import (
 import sys
 from functools import partial
 from fetal_brain_utils import get_cropped_stack_based_on_mask
+import warnings
 
 SKIMAGE_FCT = [fct for _, fct in getmembers(skimage.filters, isfunction)]
-SEGM = {"BG": 0, "CSF": 1, "GM": 2, "WM": 3}
+SEGM = {"CSF": 1, "GM": 2, "WM": 3, "BS": 4, "CBM": 5}
 # Re-mapping to do for FeTA labels: ventricles as CSF, dGM as GM.
-FETA_LABELS = [0, 1, 2, 3, 1, None, 2, None, None]
+FETA_LABELS = [None, 1, 2, 3, 1, None, 2, None, None]
 segm_names = list(SEGM.keys())
+
+BOUNTI_LABELS = [
+    None,
+    1,
+    1,
+    2,
+    2,
+    3,
+    3,
+    1,
+    1,
+    1,
+    4,
+    5,
+    5,
+    5,
+    2,
+    2,
+    2,
+    2,
+    1,
+    1,
+]
 
 
 class SRMetrics:
@@ -65,9 +90,8 @@ class SRMetrics:
 
     def __init__(
         self,
-        # metrics=None,
         verbose=False,
-        map_seg=FETA_LABELS,
+        map_seg=BOUNTI_LABELS,
     ):
         default_params = dict(
             compute_on_mask=True,
@@ -175,11 +199,6 @@ class SRMetrics:
                 type="noref",
                 compute_on_mask=True,
             ),
-            # This metric currently does not work.
-            # "bias": partial(
-            #    self._metric_bias_field,
-            #    compute_on_mask=True,
-            # ),
             ## Filter-based metrics
             "filter_laplace": partial(self._metric_filter, filter=laplace),
             "filter_sobel": partial(self._metric_filter, filter=sobel),
@@ -189,7 +208,6 @@ class SRMetrics:
             "seg_cnr": self.process_metric(self._seg_cnr, type="seg"),
             "seg_cjv": self.process_metric(self._seg_cjv, type="seg"),
             "seg_wm2max": self.process_metric(self._seg_wm2max, type="seg"),
-            "im_size": self._metric_vx_size,
         }
         self._metrics = self.get_all_metrics()
         self._check_metrics()
@@ -283,7 +301,7 @@ class SRMetrics:
             results[metric], results[metric + "_nan"] = out
         return results
 
-    def evaluate_metrics(self, lr_path, seg_path):
+    def evaluate_metrics(self, lr_path, mask_path, seg_path):
         """Evaluate the metrics for a given LR image and mask.
 
         Args:
@@ -299,13 +317,16 @@ class SRMetrics:
         # Reset the summary statistics
         self._sstats = None
 
-        imagec, maskc, seg_dict = self._load_and_prep_nifti(lr_path, seg_path)
-        vx_size = ni.load(lr_path).header.get_zooms()
+        resample_to = 0.8
+        imagec, maskc, seg_dict = self._load_and_prep_nifti(
+            lr_path, mask_path, seg_path, resample_to
+        )
+
         args_dict = {
             "image": imagec,
             "mask": maskc,
             "seg_dict": seg_dict,
-            "vx_size": vx_size,
+            "vx_size": [resample_to] * 3,
         }
         if any(["seg_" in m for m in self._metrics]):
             assert seg_path is not None, (
@@ -374,10 +395,6 @@ class SRMetrics:
         seg_path = str(seg_path).strip()
         if seg_path.endswith(".nii.gz"):
             seg_ni = ni.load(seg_path)
-            mask_ni = ni.Nifti1Image(
-                squeeze_dim(seg_ni.get_fdata() > 0, -1).astype(np.uint8),
-                seg_ni.affine,
-            )
             seg = squeeze_dim(seg_ni.get_fdata(), -1).astype(np.uint8)
             seg_remapped = np.zeros_like(seg)
             for label, target in enumerate(self.map_seg):
@@ -392,7 +409,7 @@ class SRMetrics:
                 f"Unknown file format for segmentation file {seg_path}"
             )
         # We cannot return a nifti object as seg_path might be .npz
-        return seg_ni, mask_ni
+        return seg_ni
 
     def _scale_intensity_percentiles(
         self, im, q_low, q_up, to_low, to_up, clip=True
@@ -418,29 +435,36 @@ class SRMetrics:
 
         return im
 
-    def _preprocess_nifti(self, im, seg_path):
+    def _preprocess_nifti(self, im_ni, mask_ni, seg_path, resample_to=0.8):
         from nilearn.image import resample_img
 
-        seg, mask = self.load_and_format_seg(seg_path)
+        seg = self.load_and_format_seg(seg_path)
 
         img = self._scale_intensity_percentiles(
-            im.get_fdata(), 0.5, 99.5, 0, 1, clip=True
+            im_ni.get_fdata() * mask_ni.get_fdata(), 0.5, 99.5, 0, 1, clip=True
         )
-        new_affine = np.diag([0.8] * 3)
-        image_ni = resample_img(
-            ni.Nifti1Image(
-                img,
-                im.affine,
-                im.header,
-            ),
-            target_affine=new_affine,
-        )
-        mask_ni = resample_img(
-            mask, target_affine=new_affine, interpolation="nearest"
-        )
-        seg = resample_img(
-            seg, target_affine=new_affine, interpolation="nearest"
-        )
+
+        new_affine = np.diag([resample_to] * 3)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            image_ni = resample_img(
+                ni.Nifti1Image(
+                    img,
+                    im_ni.affine,
+                    im_ni.header,
+                ),
+                target_affine=new_affine,
+            )
+            mask_ni = ni.Nifti1Image(
+                mask_ni.get_fdata(), im_ni.affine, im_ni.header
+            )
+            mask_ni = resample_img(
+                mask_ni, target_affine=new_affine, interpolation="nearest"
+            )
+            seg = resample_img(
+                seg, target_affine=new_affine, interpolation="nearest"
+            )
 
         def crop_stack(x, y):
             return get_cropped_stack_based_on_mask(
@@ -452,6 +476,7 @@ class SRMetrics:
             )
 
         # seg_dict = {k: (seg == l).astype(np.uint8) for k, l in SEGM.items()}
+
         seg_dict = {
             k: crop_stack(
                 ni.Nifti1Image(
@@ -467,11 +492,7 @@ class SRMetrics:
         maskc = crop_stack(mask_ni, mask_ni)
         return imagec, maskc, seg_dict
 
-    def _load_and_prep_nifti(
-        self,
-        lr_path,
-        seg_path,
-    ):
+    def _load_and_prep_nifti(self, lr_path, mask_path, seg_path, resample_to):
         image_ni = ni.load(lr_path)
         # zero_fill the Nan values
         image_ni = ni.Nifti1Image(
@@ -479,12 +500,34 @@ class SRMetrics:
             image_ni.affine,
             image_ni.header,
         )
+        mask_ni = ni.load(mask_path)
 
-        imagec, maskc, seg_dict = self._preprocess_nifti(image_ni, seg_path)
+        imagec, maskc, seg_dict = self._preprocess_nifti(
+            image_ni, mask_ni, seg_path, resample_to
+        )
 
         def squeeze_flip_tr(x):
+            """Squeeze_dim returns a numpy array"""
             return squeeze_dim(x, -1)[::-1, ::-1, ::-1].transpose(2, 1, 0)
 
+        # import time
+
+        # ti = time.time()
+        # ni.save(
+        #     imagec,
+        #     f"im_{ti}.nii.gz",
+        # )
+        # ni.save(
+        #     maskc,
+        #     f"mask_{ti}.nii.gz",
+        # )
+        # seg_data = np.zeros_like(imagec.get_fdata())
+        # for i, (k, v) in enumerate(seg_dict.items()):
+        #     seg_data += (i + 1) * v.get_fdata()
+        # ni.save(
+        #     ni.Nifti1Image(seg_data, imagec.affine, imagec.header),
+        #     f"seg_{ti}.nii.gz",
+        # )
         imagec = squeeze_flip_tr(imagec.get_fdata())
         maskc = squeeze_flip_tr(maskc.get_fdata())
         seg_dict = {
@@ -588,7 +631,6 @@ class SRMetrics:
         out = cnr(
             self._sstats["WM"]["median"],
             self._sstats["GM"]["median"],
-            self._sstats["BG"]["stdv"],
             self._sstats["WM"]["stdv"],
             self._sstats["GM"]["stdv"],
         )
@@ -699,57 +741,6 @@ class SRMetrics:
     ):
         return seg_metric(image, seg_dict)
 
-    def _metric_bias_field(
-        self,
-        image,
-        mask,
-        vx_size,
-        compute_on_mask=True,
-        spline_order=3,
-        wiener_filter_noise=0.11,
-        convergence_threshold=1e-6,
-        fwhm=0.15,
-        **kwargs,
-    ) -> np.ndarray:
-        """ """
-
-        import SimpleITK as sitk
-
-        bias_corr = sitk.N4BiasFieldCorrectionImageFilter()
-
-        bias_corr.SetBiasFieldFullWidthAtHalfMaximum(fwhm)
-        bias_corr.SetConvergenceThreshold(convergence_threshold)
-        bias_corr.SetSplineOrder(spline_order)
-        bias_corr.SetWienerFilterNoise(wiener_filter_noise)
-        print(image.shape, mask.shape)
-        image_sitk = sitk.GetImageFromArray(image, sitk.sitkFloat32)
-        image_sitk.SetSpacing(vx_size)
-        image_sitk.SetOrigin((0, 0, 0))
-
-        sitk_mask = sitk.GetImageFromArray(mask, sitk.sitkInt8)
-        sitk_mask.SetSpacing(vx_size)
-        sitk_mask.SetOrigin((0, 0, 0))
-        print(image_sitk, sitk_mask, image_sitk.GetSize(), sitk_mask.GetSize())
-        # sitk.ReadImage(str(mask_path), sitk.sitkUInt8)
-        # Allows to deal with masks that have a different shape than the input image.
-        bias_corr.Execute(image_sitk, sitk_mask)
-        bias_field = sitk.Cast(
-            sitk.Exp(bias_corr.GetLogBiasFieldAsImage(image_sitk)),
-            sitk.sitkFloat64,
-        )
-        bias_error = sitk.GetArrayFromImage(
-            abs(image_sitk - image_sitk / bias_field)
-        )
-        im_ref = sitk.GetArrayFromImage(image_sitk)
-        mask = sitk.GetArrayFromImage(sitk_mask)
-        if compute_on_mask:
-            bias_error = bias_error[mask > 0]
-            im_ref = im_ref[mask > 0]
-
-        isnan = np.any(np.isnan(bias_error))
-        bias_nmae = np.nanmean(bias_error) / np.nanmean(abs(im_ref))
-        return bias_nmae, isnan
-
     ### Filter-based metrics
 
     def _metric_filter(
@@ -778,30 +769,3 @@ class SRMetrics:
         filtered = filter(image)
         res = np.mean(abs(filtered - image))
         return res, np.isnan(res)
-
-    def _metric_vx_size(self, vx_size, **kwargs):
-        """Given a path to a LR image and its corresponding image,
-        loads the LR image and return the voxel size.
-        """
-
-        x, y, z = vx_size
-        out_dict = {
-            "x": x,
-            "y": y,
-            "z": z,
-            "vx_size": x * y * z,
-        }
-        return out_dict
-
-
-class SubjectMetrics:
-    """TODO"""
-
-    def metric_include_volumes_median(self, sub_volumes_dict):
-        """TODO"""
-        median_volume = np.median(list(sub_volumes_dict.values()))
-        median_volume_dict = {
-            k: v > 0.7 * median_volume for k, v in sub_volumes_dict.items()
-        }
-        median_volume_dict["median"] = median_volume
-        return median_volume_dict

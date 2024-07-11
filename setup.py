@@ -15,8 +15,10 @@ setup(
     description="Quality control for fetal brain MRI",
     author="Thomas Sanchez",
     author_email="thomas.sanchez@unil.ch",
-    install_requires=install_requires(),
     entry_points={
-        "console_scripts": [],
+        "console_scripts": [
+            "srqc_segmentation = fetmrqc_sr.cli.compute_segmentation:main",
+            "srqc_compute_iqms = fetmrqc_sr.cli.compute_iqms:main",
+        ],
     },
 )

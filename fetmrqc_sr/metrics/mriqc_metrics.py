@@ -110,7 +110,7 @@ def snr(mu_fg, sigma_fg, n):
     return float(mu_fg / (sigma_fg * sqrt(n / (n - 1))))
 
 
-def cnr(mu_wm, mu_gm, sigma_bg, sigma_wm, sigma_gm):
+def cnr(mu_wm, mu_gm, sigma_wm, sigma_gm):
     r"""
     Calculate the :abbr:`CNR (Contrast-to-Noise Ratio)` [Magnota2006]_.
     Higher values are better.
@@ -121,16 +121,13 @@ def cnr(mu_wm, mu_gm, sigma_bg, sigma_wm, sigma_gm):
     the air (background) mask.
     :param float mu_wm: mean of signal within white-matter mask.
     :param float mu_gm: mean of signal within gray-matter mask.
-    :param float sigma_air: standard deviation of the air surrounding the head ("hat" mask).
+    Removed the sigma_bg parameter as it is not useful in the context of fetal brain MRI
     :param float sigma_wm: standard deviation within white-matter mask.
     :param float sigma_gm: standard within gray-matter mask.
     :return: the computed CNR
     """
     # Does this make sense to implement this given that sigma_air=0 artificially?
-    return float(
-        abs(mu_wm - mu_gm)
-        / sqrt(sigma_bg**2 + sigma_gm**2 + sigma_wm**2)
-    )
+    return float(abs(mu_wm - mu_gm) / sqrt(sigma_gm**2 + sigma_wm**2))
 
 
 def cjv(mu_wm, mu_gm, sigma_wm, sigma_gm):
