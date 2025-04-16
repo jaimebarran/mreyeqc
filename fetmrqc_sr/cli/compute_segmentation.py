@@ -149,7 +149,7 @@ def save_df(df, df_path):
         raise ValueError("bids_csv must be either csv or tsv.")
 
 
-def run_bounti(bids_csv, out_path, chunk_size, device):
+def run_bounti(bids_csv, out_path, chunk_size, robust_preprocessing, device):
     """
     Loads the data from bids_csv, checks whether the segmentation has already been computed
     and if not, computes the segmentation, saves it to the <out_path> folder and updates the
@@ -183,7 +183,19 @@ def run_bounti(bids_csv, out_path, chunk_size, device):
         tmp_dir = create_tmp_dir()
         tmp_dir2 = create_tmp_dir("out")
         for f in chunk:
-            os.system(f"cp {f} {tmp_dir}")
+            if robust_preprocessing:
+                import nibabel as nib
+
+                im = nib.load(f)
+                basename = os.path.basename(f)
+                data = im.get_fdata()
+                max_intensity = np.percentile(data, 99.5)
+                data = data.clip(0, max_intensity)
+                im = nib.Nifti1Image(data, im.affine, im.header)
+                nib.save(im, os.path.join(tmp_dir, basename))
+
+            else:
+                os.system(f"cp {f} {tmp_dir}")
 
         if device == "cpu":
             cmd = (
@@ -245,6 +257,13 @@ def main():
         default=25,
         type=int,
     )
+
+    p.add_argument(
+        "--robust_prepro",
+        help="Enable Robust preprocessing prior to calling BOUNTI (normalizing extreme values to 99.5-th percentile).",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     p.add_argument(
         "--device",
         help="Device to use for the segmentation. Options: 'cpu' or 'cuda'.",
@@ -255,7 +274,7 @@ def main():
     args = p.parse_args()
     print_title("Running BOUNTI segmentation on SR volumes.")
     out_path = Path(args.out_path).absolute()
-    run_bounti(args.bids_csv, out_path, args.chunk_size, args.device)
+    run_bounti(args.bids_csv, out_path, args.chunk_size, args.robust_prepro, args.device)
     return 0
 
 

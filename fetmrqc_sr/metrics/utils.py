@@ -354,3 +354,32 @@ def ssim(x, x_ref, mask=None, datarange=None):
             return ssim[1][mask > 0].mean()
 
     return pick_ssim(ssim, mask)
+
+
+def compute_topological_features(map):
+    """
+    Evaluate the topology of a given map.
+
+    Parameters:
+    - map: A 3D numpy array representing the map.
+
+    Returns:
+    - A tuple containing the Betti numbers and the Euler characteristic of the map.
+
+    From https://github.com/smilell/Topology-Evaluation/blob/main/evaluation.py
+    Authors: Liu Li, Priscille de Dumast
+    """
+    import gudhi as gd
+    # Betti number computation
+    cubic = gd.CubicalComplex(dimensions=map.shape,
+                              top_dimensional_cells=map.flatten(order='F'))
+
+    cubic.persistence(homology_coeff_field=2, min_persistence=0.99)
+    pairs_nda = cubic.cofaces_of_persistence_pairs()
+
+    betti_number_0dim = pairs_nda[0][2].shape[0]
+    betti_number_1dim = pairs_nda[0][1].shape[0]
+    betti_number_2dim = pairs_nda[0][0].shape[0]
+    betti_number_list = [betti_number_0dim, betti_number_1dim, betti_number_2dim]
+    ec = int(betti_number_0dim) - int(betti_number_1dim) + int(betti_number_2dim)
+    return betti_number_list, ec

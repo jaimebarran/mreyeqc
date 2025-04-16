@@ -25,17 +25,34 @@ from fetal_brain_utils import csv_to_list, print_title
 from fetmrqc_sr.metrics import SRMetrics
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
+import sys
+
+EXCEPTION_STATUS = None
 
 
-def process_subject(idx, run, verbose):
-    name = Path(run["im"]).name
+def process_subject(idx, run, verbose, robust, correct_bias, metrics=None):
+    global EXCEPTION_STATUS
+    while not EXCEPTION_STATUS:
+        try:
+            name = Path(run["im"]).name
+            sub = run["sub"]
+            print(f"Processing subject {sub} ({name}) (PID: {os.getpid()})")
+            sr_metrics = SRMetrics(
+                verbose=verbose,
+                robust_preprocessing=robust,
+                correct_bias=correct_bias,
+                counter=idx,
+            )
+            if metrics is not None:
+                sr_metrics.set_metrics(metrics)
+            res = sr_metrics.evaluate_metrics(
+                run["im"], run["mask"], run["seg"]
+            )
+            return idx, res
+        except Exception as e:
 
-    print(f"Processing subject {name} (PID: {os.getpid()})")
-    lr_metrics = SRMetrics(
-        verbose=verbose,
-    )
-    res = lr_metrics.evaluate_metrics(run["im"], run["mask"], run["seg"])
-    return idx, res
+            EXCEPTION_STATUS = e
+            return e, run, os.getpid()
 
 
 def main(argv=None):
@@ -70,6 +87,13 @@ def main(argv=None):
     )
 
     p.add_argument(
+        "--metrics",
+        nargs="*",
+        help="List of metrics to compute. If not provided, all metrics are computed.",
+        default=None,
+    )
+
+    p.add_argument(
         "--verbose",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -79,6 +103,18 @@ def main(argv=None):
         "--nworkers", type=int, default=5, help="Number of workers."
     )
 
+    p.add_argument(
+        "--robust_prepro",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable robust preprocessing prior to IQMs computation.",
+    )
+    p.add_argument(
+        "--correct_bias",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable bias field correction.",
+    )
     args = p.parse_args(argv)
     df_base = pd.read_csv(args.bids_csv)
     df_base = df_base.set_index("name")
@@ -89,6 +125,7 @@ def main(argv=None):
     os.makedirs(Path(args.out_csv).parent, exist_ok=True)
 
     # If a file is found, continue.
+
     if os.path.isfile(args.out_csv) and args.continue_run:
         print("\tCONTINUING FROM A PREVIOUSLY FOUND RUN.")
         df = pd.read_csv(args.out_csv).set_index("name")
@@ -98,24 +135,47 @@ def main(argv=None):
             k: {k2: v2 for k2, v2 in v.items() if k2 not in df_base.columns}
             for k, v in metrics_dict.items()
         }
-
     df_run = df_base[~df_base.index.isin(metrics_dict.keys())]
 
     start = time.time()
+    # for idx, run in df_run.iterrows():
+    # res = process_subject(idx, run, args.verbose)
     with ProcessPoolExecutor(args.nworkers) as executor:
         # submit tasks and collect futures
-        futures = [
-            executor.submit(process_subject, idx, run, args.verbose)
-            for idx, run in df_run.iterrows()
-        ]
+        futures = []
+        for idx, run in df_run.iterrows():
+            futures.append(
+                executor.submit(process_subject, idx, run, args.verbose, args.robust_prepro, args.correct_bias, args.metrics)
+            )
         # process task results as they are available
         for i, future in enumerate(as_completed(futures)):
-            idx, res = future.result()
+        #for i, (idx, run) in enumerate(df_run.iterrows()):
+            #out = process_subject(idx, run, args.verbose, args.metrics)
+            out = future.result()
+            if len(out) == 2:
+                idx, res = out
+            elif len(out) == 3:
+                error, run, pid = out
+
+                print(
+                    f"ERROR in thread {pid}. Here are the inputs that led to the error:"
+                )
+                missing = []
+                for k, v in run.items():
+                    if k in ["im", "mask", "seg"]:
+                        # Check if v is nan
+                        if v is None or pd.isna(v) or v == "nan" or v == "":
+                            missing.append(k)
+                    print(f"\t{k}: {v}")
+                if len(missing) > 0:
+                    print(
+                        f"WARNING: Found some missing inputs: {', '.join(missing)}. This likely caused the error."
+                    )
+                raise type(error).with_traceback(error, error.__traceback__)
             metrics_dict[idx] = res
             df = pd.DataFrame.from_dict(metrics_dict, orient="index")
             df = pd.concat([df_base, df], axis=1, join="inner")
             df.index.name = "name"
-
             df.to_csv(args.out_csv)
     print(f"Finished in {time.time() - start:.2f} seconds")
     return 0

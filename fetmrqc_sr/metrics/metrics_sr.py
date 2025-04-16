@@ -34,6 +34,7 @@ from .utils import (
     centroid,
     rank_error,
     mask_volume,
+    compute_topological_features
 )
 from skimage.filters import sobel, laplace
 from inspect import getmembers, isfunction
@@ -91,7 +92,10 @@ class SRMetrics:
     def __init__(
         self,
         verbose=False,
+        robust_preprocessing=False,
+        correct_bias=False,
         map_seg=BOUNTI_LABELS,
+        counter=0,
     ):
         default_params = dict(
             compute_on_mask=True,
@@ -101,6 +105,8 @@ class SRMetrics:
         )
 
         self.verbose = verbose
+        self.robust_prepro = robust_preprocessing
+        self.correct_bias = correct_bias
         self.metrics_func = {
             "centroid": partial(centroid),
             "rank_error": partial(
@@ -208,6 +214,7 @@ class SRMetrics:
             "seg_cnr": self.process_metric(self._seg_cnr, type="seg"),
             "seg_cjv": self.process_metric(self._seg_cjv, type="seg"),
             "seg_wm2max": self.process_metric(self._seg_wm2max, type="seg"),
+            "seg_topology": self.process_metric(self._seg_topology, type="seg"),
         }
         self._metrics = self.get_all_metrics()
         self._check_metrics()
@@ -215,6 +222,7 @@ class SRMetrics:
         # Summary statistics from the segmentation, used for computing a bunch of metrics
         # besides being a metric itself
         self._sstats = None
+        self.counter=counter
 
     def get_all_metrics(self):
         return list(self.metrics_func.keys())
@@ -241,10 +249,21 @@ class SRMetrics:
             "mad",
             "n",
         ]
+
+        topo_keys = [
+            "b1",
+            "b2",
+            "b3",
+            "ec",
+        ]
         if "seg_" in metric:
             metrics = segm_names
             if "seg_sstats" in metric:
                 metrics = [f"{n}_{k}" for n in segm_names for k in sstats_keys]
+                return {m: np.nan for m in metrics}
+            elif "seg_topology" in metric:
+                metrics = [f"{n}_{k}" for n in segm_names + ["mask"] for k in topo_keys]
+                return {m: np.nan for m in metrics}
             return {m: np.nan for m in metrics}
         else:
             return [np.nan]
@@ -301,11 +320,11 @@ class SRMetrics:
             results[metric], results[metric + "_nan"] = out
         return results
 
-    def evaluate_metrics(self, lr_path, mask_path, seg_path):
+    def evaluate_metrics(self, sr_path, mask_path, seg_path):
         """Evaluate the metrics for a given LR image and mask.
 
         Args:
-            lr_path (str): Path to the LR image.
+            sr_path (str): Path to the LR image.
             seg_path (str, optional): Path to the segmentation. Defaults to None.
 
         Returns:
@@ -319,7 +338,7 @@ class SRMetrics:
 
         resample_to = 0.8
         imagec, maskc, seg_dict = self._load_and_prep_nifti(
-            lr_path, mask_path, seg_path, resample_to
+            sr_path, mask_path, seg_path, resample_to
         )
 
         args_dict = {
@@ -435,36 +454,85 @@ class SRMetrics:
 
         return im
 
-    def _preprocess_nifti(self, im_ni, mask_ni, seg_path, resample_to=0.8):
+    def _preprocess_nifti(
+        self, im_ni, mask_ni, seg_path, resample_to=0.8, mask_im=True, robust=True, bias_corr=False
+    ):
         from nilearn.image import resample_img
-
+        # ni.save(im_ni, f"test_{self.counter}.nii.gz")
         seg = self.load_and_format_seg(seg_path)
+        if bias_corr:
+            import SimpleITK as sitk
+            def ni2sitk(im):
+                im_sitk = sitk.GetImageFromArray(im.get_fdata().transpose(2,1,0))
+                x,y,z = im.header.get_zooms()
+                im_sitk.SetSpacing((float(x), float(y), float(z)))
+                # get qform
+                x,y,z = im.affine[:3,3]
+                im_sitk.SetOrigin((float(x), float(y), float(z)))
+                return im_sitk
 
-        img = self._scale_intensity_percentiles(
-            im_ni.get_fdata() * mask_ni.get_fdata(), 0.5, 99.5, 0, 1, clip=True
+            im_sitk = ni2sitk(im_ni)
+            mask_sitk = ni2sitk(mask_ni)
+            mask_sitk = sitk.Cast(mask_sitk, sitk.sitkUInt8)
+            im_max, im_min = sitk.GetArrayFromImage(im_sitk).max(), sitk.GetArrayFromImage(im_sitk).min()
+            # Normalize im with sitk
+            rescaler = sitk.RescaleIntensityImageFilter()
+            rescaler.SetOutputMaximum(1)
+            rescaler.SetOutputMinimum(0)
+            im_sitk = rescaler.Execute(im_sitk)
+
+            # Correct bias field
+            corrector = sitk.N4BiasFieldCorrectionImageFilter()
+            corrector.SetBiasFieldFullWidthAtHalfMaximum(0.25)
+            corrector.SetSplineOrder(3)
+            corrected_im = corrector.Execute(im_sitk, mask_sitk)
+            corrected_im = rescaler.Execute(corrected_im)
+            img  = sitk.GetArrayFromImage(corrected_im)
+            #Map back to original range
+            img = (img  * (im_max - im_min)) + im_min
+            im_ni = ni.Nifti1Image(img.transpose(2,1,0), im_ni.affine, im_ni.header)
+        # ni.save(im_ni, f"test_{self.counter}_after_bias.nii.gz")
+
+        img = (
+            im_ni.get_fdata() * mask_ni.get_fdata()
+            if mask_im
+            else im_ni.get_fdata()
         )
+        
+        
+        if robust:
+            img = self._scale_intensity_percentiles(
+                img, 0.5, 99.5, 0, 1, clip=True
+            )
 
-        new_affine = np.diag([resample_to] * 3)
+            new_affine = np.diag([resample_to] * 3)
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            image_ni = resample_img(
-                ni.Nifti1Image(
-                    img,
-                    im_ni.affine,
-                    im_ni.header,
-                ),
-                target_affine=new_affine,
-            )
-            mask_ni = ni.Nifti1Image(
-                mask_ni.get_fdata(), im_ni.affine, im_ni.header
-            )
-            mask_ni = resample_img(
-                mask_ni, target_affine=new_affine, interpolation="nearest"
-            )
-            seg = resample_img(
-                seg, target_affine=new_affine, interpolation="nearest"
-            )
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                image_ni = resample_img(
+                    ni.Nifti1Image(
+                        img,
+                        im_ni.affine,
+                        im_ni.header,
+                    ),
+                    target_affine=new_affine,
+                )
+                mask_ni = ni.Nifti1Image(
+                    mask_ni.get_fdata(), im_ni.affine, im_ni.header
+                )
+                mask_ni = resample_img(
+                    mask_ni, target_affine=new_affine, interpolation="nearest"
+                )
+                seg = resample_img(
+                    seg, target_affine=new_affine, interpolation="nearest"
+                )
+        else:
+            image_ni = ni.Nifti1Image(
+                        img,
+                        im_ni.affine,
+                        im_ni.header,
+                    )
+            
 
         def crop_stack(x, y):
             return get_cropped_stack_based_on_mask(
@@ -489,11 +557,12 @@ class SRMetrics:
             for k, l in SEGM.items()
         }
         imagec = crop_stack(image_ni, mask_ni)
+        #ni.save(imagec, f"test_{self.counter}_postproc.nii.gz")
         maskc = crop_stack(mask_ni, mask_ni)
         return imagec, maskc, seg_dict
 
-    def _load_and_prep_nifti(self, lr_path, mask_path, seg_path, resample_to):
-        image_ni = ni.load(lr_path)
+    def _load_and_prep_nifti(self, sr_path, mask_path, seg_path, resample_to):
+        image_ni = ni.load(sr_path)
         # zero_fill the Nan values
         image_ni = ni.Nifti1Image(
             np.nan_to_num(image_ni.get_fdata()),
@@ -501,38 +570,25 @@ class SRMetrics:
             image_ni.header,
         )
         mask_ni = ni.load(mask_path)
-
+        seg_ni = ni.load(seg_path)
+        mask = np.clip(
+            mask_ni.get_fdata() + (seg_ni.get_fdata() > 0).astype(int), 0, 1
+        )
+        mask_ni = ni.Nifti1Image(mask, mask_ni.affine, mask_ni.header)
         imagec, maskc, seg_dict = self._preprocess_nifti(
-            image_ni, mask_ni, seg_path, resample_to
+            image_ni, mask_ni, seg_path, resample_to, robust=self.robust_prepro, bias_corr=self.correct_bias
         )
 
         def squeeze_flip_tr(x):
             """Squeeze_dim returns a numpy array"""
             return squeeze_dim(x, -1)[::-1, ::-1, ::-1].transpose(2, 1, 0)
 
-        # import time
-
-        # ti = time.time()
-        # ni.save(
-        #     imagec,
-        #     f"im_{ti}.nii.gz",
-        # )
-        # ni.save(
-        #     maskc,
-        #     f"mask_{ti}.nii.gz",
-        # )
-        # seg_data = np.zeros_like(imagec.get_fdata())
-        # for i, (k, v) in enumerate(seg_dict.items()):
-        #     seg_data += (i + 1) * v.get_fdata()
-        # ni.save(
-        #     ni.Nifti1Image(seg_data, imagec.affine, imagec.header),
-        #     f"seg_{ti}.nii.gz",
-        # )
-        imagec = squeeze_flip_tr(imagec.get_fdata())
-        maskc = squeeze_flip_tr(maskc.get_fdata())
-        seg_dict = {
-            k: squeeze_flip_tr(v.get_fdata()) for k, v in seg_dict.items()
-        }
+        if imagec is not None:
+            imagec = squeeze_flip_tr(imagec.get_fdata())
+            maskc = squeeze_flip_tr(maskc.get_fdata())
+            seg_dict = {
+                k: squeeze_flip_tr(v.get_fdata()) for k, v in seg_dict.items()
+            }
         return imagec, maskc, seg_dict
 
     def _remove_empty_slices(self, image, mask):
@@ -656,6 +712,29 @@ class SRMetrics:
         out = wm2max(image, self._sstats["WM"]["median"])
         is_nan = np.isnan(out)
         return 0.0 if is_nan else out, is_nan
+
+    def _seg_topology(self, image, segmentation):
+        topo_dict = {}
+        
+        for tlabel in segmentation.keys():
+            betti_numbers, ec = compute_topological_features(
+                segmentation[tlabel]
+            )
+            b1, b2, b3 = betti_numbers
+            topo_dict[f"{tlabel}_b1"] = b1
+            topo_dict[f"{tlabel}_b2"] = b2
+            topo_dict[f"{tlabel}_b3"] = b3
+            topo_dict[f"{tlabel}_ec"] = ec
+        mask = np.zeros_like(image)
+        for tlabel in segmentation.keys():
+            mask += segmentation[tlabel]
+
+        betti_numbers, ec = compute_topological_features(mask)
+        topo_dict["mask_b1"] = betti_numbers[0]
+        topo_dict["mask_b2"] = betti_numbers[1]
+        topo_dict["mask_b3"] = betti_numbers[2]
+        topo_dict["mask_ec"] = ec
+        return topo_dict
 
     def preprocess_and_evaluate_metric(
         self,
