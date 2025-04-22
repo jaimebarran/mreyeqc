@@ -1,6 +1,6 @@
-# FetMRQC: Quality control for fetal brain MRI
+# FetMRQC SR: Quality control for fetal brain MRI
 #
-# Copyright 2023 Medical Image Analysis Laboratory (MIAL)
+# Copyright 2025 Medical Image Analysis Laboratory (MIAL)
 #
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,93 +15,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
-from pathlib import Path
-import fetal_brain_qc as fbqc
 
 
-MANU_BASE = (
-    "/media/tsanchez/tsanchez_data/data/data_anon/derivatives/refined_masks/"
-)
-AUTO_BASE = (
-    "/media/tsanchez/tsanchez_data/data/data_anon/derivatives/automated_masks/"
-)
-MASK_PATTERN = (
-    "sub-{subject}[/ses-{session}][/{datatype}]/sub-{subject}"
-    "[_ses-{session}][_acq-{acquisition}][_run-{run}]_{suffix}.nii.gz"
-)
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__)) 
 
-MASK_PATTERN_LIST = [MANU_BASE + MASK_PATTERN, AUTO_BASE + MASK_PATTERN]
 
-BRAIN_CKPT = os.path.join(
-    os.path.dirname(fbqc.__file__), "models/MONAIfbs_dynunet_ckpt.pt"
-)
-
-FETAL_IQA_CKPT = os.path.join(
-    os.path.dirname(fbqc.__file__), "models/fetal_IQA_pytorch.ckpt"
-)
-
-FETAL_STACK_IQA_CKPT = os.path.join(
-    os.path.dirname(fbqc.__file__), "models/FNNDSC_qcnet_ckpt.hdf5"
-)
-
-FETAL_FETMRQC_CLF_CKPT = os.path.join(
-    os.path.dirname(fbqc.__file__), "models/fetmrqc_full_class.joblib"
-)
-FETAL_FETMRQC_REG_CKPT = os.path.join(
-    os.path.dirname(fbqc.__file__), "models/fetmrqc_full_regr.joblib"
-)
-FETAL_FETMRQC20_CLF_CKPT = os.path.join(
-    os.path.dirname(fbqc.__file__), "models/fetmrqc_20_class.joblib"
-)
-FETAL_FETMRQC20_REG_CKPT = os.path.join(
-    os.path.dirname(fbqc.__file__), "models/fetmrqc_20_regr.joblib"
-)
-IQMs = os.path.join(os.path.dirname(fbqc.__file__), "data/iqms_train.csv")
-
-NNUNET_CKPT = os.path.join(os.path.dirname(fbqc.__file__), "models/nnUNet")
-NNUNET_ENV_DEFAULT = Path(os.getenv("CONDA_PREFIX")).parent / "nnunet"
-
-FETMRQC20 = [
-    "rank_error",
-    "dilate_erode_mask_full",
-    "mask_volume",
-    "filter_sobel_mask_full",
-    "nrmse_window",
-    "filter_laplace_mask",
-    "filter_laplace_mask_full",
-    "dilate_erode_mask",
-    "rank_error_center",
-    "seg_sstats_BG_n",
-    "centroid",
-    "rank_error_center_relative",
-    "seg_sstats_CSF_n",
-    "seg_sstats_GM_n",
-    "im_size_z",
-    "ncc_intersection",
-    "ncc_window",
-    "psnr_window",
-    "seg_snr_WM",
-    "seg_volume_GM",
-]
-# This is a slightly different list from FETMRQC20
-# as some metrics are only available in groups
-FETMRQC20_METRICS = [
-    "rank_error",
-    "dilate_erode_mask_full",
-    "mask_volume",
-    "filter_sobel_mask_full",
-    "nrmse_window",
-    "filter_laplace_mask",
-    "filter_laplace_mask_full",
-    "dilate_erode_mask",
-    "rank_error_center",
-    "centroid",
-    "rank_error_center_relative",
-    "seg_sstats",
-    "im_size",
-    "ncc_intersection",
-    "ncc_window",
-    "psnr_window",
-    "seg_snr",
-    "seg_volume",
-]
+IQMS = ['centroid', 'centroid_nan', 'rank_error', 'rank_error_nan', 'rank_error_relative', 'rank_error_relative_nan', 'mask_volume', 'mask_volume_nan', 'ncc_window', 'ncc_window_nan', 'ncc_median', 'ncc_median_nan', 'joint_entropy_window', 'joint_entropy_window_nan', 'joint_entropy_median', 'joint_entropy_median_nan', 'mi_window', 'mi_window_nan', 'mi_median', 'mi_median_nan', 'nmi_window', 'nmi_window_nan', 'nmi_median', 'nmi_median_nan', 'shannon_entropy', 'shannon_entropy_nan', 'psnr_window', 'psnr_window_nan', 'nrmse_window', 'nrmse_window_nan', 'rmse_window', 'rmse_window_nan', 'nmae_window', 'nmae_window_nan', 'mae_window', 'mae_window_nan', 'ssim_window', 'ssim_window_nan', 'mean', 'mean_nan', 'std', 'std_nan', 'median', 'median_nan', 'percentile_5', 'percentile_5_nan', 'percentile_95', 'percentile_95_nan', 'kurtosis', 'kurtosis_nan', 'variation', 'variation_nan', 'filter_laplace', 'filter_laplace_nan', 'filter_sobel', 'filter_sobel_nan', 'seg_sstats_CSF_mean', 'seg_sstats_CSF_mean_nan', 'seg_sstats_CSF_median', 'seg_sstats_CSF_median_nan', 'seg_sstats_CSF_p95', 'seg_sstats_CSF_p95_nan', 'seg_sstats_CSF_p05', 'seg_sstats_CSF_p05_nan', 'seg_sstats_CSF_k', 'seg_sstats_CSF_k_nan', 'seg_sstats_CSF_stdv', 'seg_sstats_CSF_stdv_nan', 'seg_sstats_CSF_mad', 'seg_sstats_CSF_mad_nan', 'seg_sstats_CSF_n', 'seg_sstats_CSF_n_nan', 'seg_sstats_GM_mean', 'seg_sstats_GM_mean_nan', 'seg_sstats_GM_median', 'seg_sstats_GM_median_nan', 'seg_sstats_GM_p95', 'seg_sstats_GM_p95_nan', 'seg_sstats_GM_p05', 'seg_sstats_GM_p05_nan', 'seg_sstats_GM_k', 'seg_sstats_GM_k_nan', 'seg_sstats_GM_stdv', 'seg_sstats_GM_stdv_nan', 'seg_sstats_GM_mad', 'seg_sstats_GM_mad_nan', 'seg_sstats_GM_n', 'seg_sstats_GM_n_nan', 'seg_sstats_WM_mean', 'seg_sstats_WM_mean_nan', 'seg_sstats_WM_median', 'seg_sstats_WM_median_nan', 'seg_sstats_WM_p95', 'seg_sstats_WM_p95_nan', 'seg_sstats_WM_p05', 'seg_sstats_WM_p05_nan', 'seg_sstats_WM_k', 'seg_sstats_WM_k_nan', 'seg_sstats_WM_stdv', 'seg_sstats_WM_stdv_nan', 'seg_sstats_WM_mad', 'seg_sstats_WM_mad_nan', 'seg_sstats_WM_n', 'seg_sstats_WM_n_nan', 'seg_sstats_BS_mean', 'seg_sstats_BS_mean_nan', 'seg_sstats_BS_median', 'seg_sstats_BS_median_nan', 'seg_sstats_BS_p95', 'seg_sstats_BS_p95_nan', 'seg_sstats_BS_p05', 'seg_sstats_BS_p05_nan', 'seg_sstats_BS_k', 'seg_sstats_BS_k_nan', 'seg_sstats_BS_stdv', 'seg_sstats_BS_stdv_nan', 'seg_sstats_BS_mad', 'seg_sstats_BS_mad_nan', 'seg_sstats_BS_n', 'seg_sstats_BS_n_nan', 'seg_sstats_CBM_mean', 'seg_sstats_CBM_mean_nan', 'seg_sstats_CBM_median', 'seg_sstats_CBM_median_nan', 'seg_sstats_CBM_p95', 'seg_sstats_CBM_p95_nan', 'seg_sstats_CBM_p05', 'seg_sstats_CBM_p05_nan', 'seg_sstats_CBM_k', 'seg_sstats_CBM_k_nan', 'seg_sstats_CBM_stdv', 'seg_sstats_CBM_stdv_nan', 'seg_sstats_CBM_mad', 'seg_sstats_CBM_mad_nan', 'seg_sstats_CBM_n', 'seg_sstats_CBM_n_nan', 'seg_volume_CSF', 'seg_volume_CSF_nan', 'seg_volume_GM', 'seg_volume_GM_nan', 'seg_volume_WM', 'seg_volume_WM_nan', 'seg_volume_BS', 'seg_volume_BS_nan', 'seg_volume_CBM', 'seg_volume_CBM_nan', 'seg_snr_CSF', 'seg_snr_CSF_nan', 'seg_snr_GM', 'seg_snr_GM_nan', 'seg_snr_WM', 'seg_snr_WM_nan', 'seg_snr_BS', 'seg_snr_BS_nan', 'seg_snr_CBM', 'seg_snr_CBM_nan', 'seg_snr_total', 'seg_snr_total_nan', 'seg_cnr', 'seg_cnr_nan', 'seg_cjv', 'seg_cjv_nan', 'seg_wm2max', 'seg_wm2max_nan', 'seg_topology_CSF_b1', 'seg_topology_CSF_b1_nan', 'seg_topology_CSF_b2', 'seg_topology_CSF_b2_nan', 'seg_topology_CSF_b3', 'seg_topology_CSF_b3_nan', 'seg_topology_CSF_ec', 'seg_topology_CSF_ec_nan', 'seg_topology_GM_b1', 'seg_topology_GM_b1_nan', 'seg_topology_GM_b2', 'seg_topology_GM_b2_nan', 'seg_topology_GM_b3', 'seg_topology_GM_b3_nan', 'seg_topology_GM_ec', 'seg_topology_GM_ec_nan', 'seg_topology_WM_b1', 'seg_topology_WM_b1_nan', 'seg_topology_WM_b2', 'seg_topology_WM_b2_nan', 'seg_topology_WM_b3', 'seg_topology_WM_b3_nan', 'seg_topology_WM_ec', 'seg_topology_WM_ec_nan', 'seg_topology_BS_b1', 'seg_topology_BS_b1_nan', 'seg_topology_BS_b2', 'seg_topology_BS_b2_nan', 'seg_topology_BS_b3', 'seg_topology_BS_b3_nan', 'seg_topology_BS_ec', 'seg_topology_BS_ec_nan', 'seg_topology_CBM_b1', 'seg_topology_CBM_b1_nan', 'seg_topology_CBM_b2', 'seg_topology_CBM_b2_nan', 'seg_topology_CBM_b3', 'seg_topology_CBM_b3_nan', 'seg_topology_CBM_ec', 'seg_topology_CBM_ec_nan', 'seg_topology_mask_b1', 'seg_topology_mask_b1_nan', 'seg_topology_mask_b2', 'seg_topology_mask_b2_nan', 'seg_topology_mask_b3', 'seg_topology_mask_b3_nan', 'seg_topology_mask_ec', 'seg_topology_mask_ec_nan']
