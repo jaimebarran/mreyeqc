@@ -9,7 +9,6 @@ description = "Automated quality control of fetal brain MRI scans"
 authors = [{name = "Thomas Sanchez", email = "thomas.sanchez@unil.ch"}]
 dependencies = [
     "fetal_brain_qc @ git+https://github.com/Medical-Image-Analysis-Laboratory/fetmrqc@main",
-    "fetal_brain_utils @ git+https://github.com/Medical-Image-Analysis-Laboratory/fetal_brain_utils@main",
 ]
 [tool.setuptools]
 packages = ["fetmrqc_sr"]

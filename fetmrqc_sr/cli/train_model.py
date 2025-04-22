@@ -67,7 +67,8 @@ def main():
     # Parser version of the code below
     import argparse
 
-    parser = argparse.ArgumentParser("Train a FetMRQC_SR classification model.")
+    parser = argparse.ArgumentParser("Train a FetMRQC_SR classification model.",
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
         "--dataset",
         help="Path to the csv file dataset.",
