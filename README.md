@@ -8,13 +8,13 @@ If you have found this useful in your research, please cite
 > Thomas Sanchez, Vladyslav Zalevskyi, Angeline Mihailov, Gerard Martí-Juan, Elisenda Eixarch, Andras Jakab, Vincent Dunet, Mériam Koob, Guillaume Auzias, Meritxell Bach Cuadra. (2025) **Automatic quality control in multi-centric fetal brain MRI super-resolution reconstruction.** [arXiv preprint arXiv:2503.10156](https://www.arxiv.org/abs/2503.10156)
 
 ## Installing FetMRQC_SR
-To install FetMRQC SR, just create a new `conda` environment with python 3.9.10
+To install FetMRQC SR, just create a new `conda` environment with python 3.9.0
 
 ```
-conda TODO
+conda create --name fetmrqc_sr python=3.9.0
 ```
 
-Then, simply install the environemnt and its dependencies by running `pip install -e .`
+Then, simply activate the environment and install `fetmrqc_sr` and its dependencies by running `pip install -e .`
 
 ## Custom model training using FetMRQC SR
 You can train your custom random forest model to predict from a given list of IQMs and using your own data. This can be done by the following steps.
