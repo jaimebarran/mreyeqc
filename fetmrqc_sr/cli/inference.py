@@ -120,7 +120,7 @@ def main():
         iqms = args.iqms_list
         print(f"Using custom IQMs: {iqms}")
 
-    out_csv = args.out_csv if args.out_csv else os.path.join(OUT_DIR, f"{args.model_path.split('/')[-1].split('.')[0]}_pred.csv")
+    out_csv = os.path.abspath(args.out_csv) if args.out_csv else os.path.join(OUT_DIR, f"{args.model_path.split('/')[-1].split('.')[0]}_pred.csv")
     out_dir = os.path.dirname(out_csv)
 
     if not os.path.exists(out_dir):
