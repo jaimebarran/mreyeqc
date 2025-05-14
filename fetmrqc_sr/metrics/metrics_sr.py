@@ -47,7 +47,9 @@ from .mriqc_metrics import (
     snr,
     cnr,
     cjv,
-    wm2max,
+    # wm2max,
+    globe_sphericity,
+    lens_aspect_ratio
 )
 import sys
 from functools import partial
@@ -55,10 +57,42 @@ from fetal_brain_utils import get_cropped_stack_based_on_mask
 import warnings
 
 SKIMAGE_FCT = [fct for _, fct in getmembers(skimage.filters, isfunction)]
-SEGM = {"CSF": 1, "GM": 2, "WM": 3, "BS": 4, "CBM": 5}
+
+SEGM = {
+    "LENS":             0,
+    "GLOBE":            1,
+    "OPTIQUE_NERVE":    2,
+    "FAT":              3,
+    "MUSCLE":           4,
+}
+
+# SEGM = {
+#     "LENS":             2,
+#     "GLOBE":            0,
+#     "OPTIQUE_NERVE":    4,
+#     "FAT":              3,
+#     "MUSCLE":           1,
+# }
+
+#SEGM = {"CSF": 1, "GM": 2, "WM": 3, "BS": 4, "CBM": 5}
 # Re-mapping to do for FeTA labels: ventricles as CSF, dGM as GM.
+
 FETA_LABELS = [None, 1, 2, 3, 1, None, 2, None, None]
+
 segm_names = list(SEGM.keys())
+
+EYE_MAP_SEG = [
+    None, # Index 0: Raw Label 0 (Background) -> Ignore
+    0,    # Index 1: Raw Label 1 (LENS)       -> Target 0 (LENS)
+    1,    # Index 2: Raw Label 2 (GLOBE)      -> Target 1 (GLOBE)
+    2,    # Index 3: Raw Label 3 (NERVE)      -> Target 2 (OPTIQUE_NERVE)
+    3,    # Index 4: Raw Label 4 (FAT)        -> Target 3 (FAT)
+    3,    # Index 5: Raw Label 5 (FAT)        -> Target 3 (FAT) <-- Group FAT
+    4,    # Index 6: Raw Label 6 (MUSCLE)     -> Target 4 (MUSCLE)
+    4,    # Index 7: Raw Label 7 (MUSCLE)     -> Target 4 (MUSCLE) <-- Group MUSCLE
+    4,    # Index 8: Raw Label 8 (MUSCLE)     -> Target 4 (MUSCLE) <-- Group MUSCLE
+    4,    # Index 9: Raw Label 9 (MUSCLE)     -> Target 4 (MUSCLE) <-- Group MUSCLE
+]
 
 BOUNTI_LABELS = [
     None,
@@ -83,7 +117,6 @@ BOUNTI_LABELS = [
     1,
 ]
 
-
 class SRMetrics:
     """Contains a battery of metrics that can be evaluated on individual
     pairs of super-resolution stacks and segmentations.
@@ -94,7 +127,7 @@ class SRMetrics:
         verbose=False,
         robust_preprocessing=False,
         correct_bias=False,
-        map_seg=BOUNTI_LABELS,
+        map_seg=EYE_MAP_SEG,
         counter=0,
     ):
         default_params = dict(
@@ -107,7 +140,7 @@ class SRMetrics:
         self.verbose = verbose
         self.robust_prepro = robust_preprocessing
         self.correct_bias = correct_bias
-        self.metrics_func = {
+        '''        self.metrics_func = {
             "centroid": partial(centroid),
             "rank_error": partial(
                 rank_error,
@@ -213,8 +246,144 @@ class SRMetrics:
             "seg_snr": self.process_metric(self._seg_snr, type="seg"),
             "seg_cnr": self.process_metric(self._seg_cnr, type="seg"),
             "seg_cjv": self.process_metric(self._seg_cjv, type="seg"),
-            "seg_wm2max": self.process_metric(self._seg_wm2max, type="seg"),
+            #"seg_wm2max": self.process_metric(self._seg_wm2max, type="seg"),
             "seg_topology": self.process_metric(self._seg_topology, type="seg"),
+
+
+
+            # For eye
+            "centroid": partial(centroid, central_third=True),
+            "centroid_full": partial(centroid, central_third=False),
+            "seg_globe_sphericity": self.process_metric(self._seg_globe_sphericity, type="seg"),
+
+            "im_size_vx_size": self._get_voxel_size,
+        }'''
+        self.metrics_func = {
+            # --- Centroid Metrics (Corrected - Use imported function) ---
+            "centroid": partial(centroid, central_third=True),
+            "centroid_full": partial(centroid, central_third=False),
+
+            # --- Rank Error Metrics ---
+            "rank_error": partial(
+                rank_error,
+                threshold=0.99,
+                relative_rank=False,
+            ),
+            "rank_error_relative": partial(
+                rank_error,
+                threshold=0.99,
+                relative_rank=True,
+            ),
+
+            # --- Mask Volume Metric ---
+            "mask_volume": mask_volume, # Assign directly
+
+            # --- Reference-Based Metrics (using process_metric) ---
+            "ncc_window": self.process_metric(
+                metric=normalized_cross_correlation, **default_params
+            ),
+            "ncc_median": self.process_metric(
+                metric=normalized_cross_correlation,
+                mask_intersection=True,
+                reduction="median",
+            ),
+            "joint_entropy_window": self.process_metric(
+                metric=joint_entropy, **default_params
+            ),
+            "joint_entropy_median": self.process_metric(
+                metric=joint_entropy,
+                compute_on_mask=True,
+                mask_intersection=True,
+                reduction="median",
+            ),
+            "mi_window": self.process_metric(
+                metric=mutual_information, **default_params
+            ),
+            "mi_median": self.process_metric(
+                metric=mutual_information,
+                compute_on_mask=True,
+                mask_intersection=True,
+                reduction="median",
+            ),
+            "nmi_window": self.process_metric(
+                metric=normalized_mutual_information, **default_params
+            ),
+            "nmi_median": self.process_metric(
+                metric=normalized_mutual_information,
+                compute_on_mask=True,
+                mask_intersection=True,
+                reduction="median",
+            ),
+            "psnr_window": self.process_metric(
+                psnr,
+                use_datarange=True,
+                **default_params,
+            ),
+            "nrmse_window": self.process_metric(nrmse, **default_params),
+            "rmse_window": self.process_metric(rmse, **default_params),
+            "nmae_window": self.process_metric(nmae, **default_params),
+            "mae_window": self.process_metric(mae, **default_params),
+            "ssim_window": partial(self._ssim, **default_params), # Uses its own wrapper _ssim
+
+            # --- Non-Reference Metrics (using process_metric) ---
+            "shannon_entropy": self.process_metric(
+                shannon_entropy,
+                type="noref",
+                compute_on_mask=True,
+            ),
+            "mean": self.process_metric(
+                np.mean,
+                type="noref",
+                compute_on_mask=True,
+            ),
+            "std": self.process_metric(
+                np.std,
+                type="noref",
+                compute_on_mask=True,
+            ),
+            "median": self.process_metric(
+                np.median,
+                type="noref",
+                compute_on_mask=True,
+            ),
+            "percentile_5": self.process_metric(
+                partial(np.percentile, q=5),
+                type="noref",
+                compute_on_mask=True,
+            ),
+            "percentile_95": self.process_metric(
+                partial(np.percentile, q=95),
+                type="noref",
+                compute_on_mask=True,
+            ),
+            "kurtosis": self.process_metric(
+                kurtosis,
+                type="noref",
+                compute_on_mask=True,
+            ),
+            "variation": self.process_metric(
+                variation,
+                type="noref",
+                compute_on_mask=True,
+            ),
+
+            # --- Filter-Based Metrics ---
+            "filter_laplace": partial(self._metric_filter, filter=laplace),
+            "filter_sobel": partial(self._metric_filter, filter=sobel),
+
+            # --- Segmentation Metrics (Corrected - Direct Assignment) ---
+            "seg_sstats": self._seg_sstats,
+            "seg_volume": self._seg_volume,
+            "seg_snr": self._seg_snr,
+            "seg_cnr": self._seg_cnr, # Uses adapted cnr internally
+            "seg_cjv": self._seg_cjv, # Uses adapted cjv internally
+            # "seg_wm2max": REMOVED
+            "seg_topology": self._seg_topology,
+            "seg_globe_sphericity": self._seg_globe_sphericity,
+            "seg_lens_aspect_ratio": self._seg_lens_aspect_ratio,
+
+            # --- Image Size Metrics ---
+            # "im_size_vx_size": self._get_voxel_size, 
         }
         self._metrics = self.get_all_metrics()
         self._check_metrics()
@@ -223,6 +392,153 @@ class SRMetrics:
         # besides being a metric itself
         self._sstats = None
         self.counter=counter
+
+    '''   def _seg_globe_sphericity(self, seg_dict, vx_size, **kwargs):
+        """
+        Wrapper to calculate globe sphericity using pre-loaded segmentation data.
+        """
+        isnan = False
+
+        globe_mask = seg_dict["GLOBE"]
+
+        try:
+            sphericity = globe_sphericity(globe_mask, vx_size)
+            if np.isnan(sphericity):
+                isnan = True
+                sphericity = 0.0
+        except Exception as e:
+            sphericity = np.nan
+            isnan = True
+
+        value_to_return = 0.0 if isnan else sphericity
+        return value_to_return, isnan'''
+    
+    def _seg_lens_aspect_ratio(self, seg_dict, vx_size, **kwargs):
+        """
+        Wrapper to calculate lens aspect ratio using pre-loaded segmentation data.
+        """
+        isnan = False
+        print(f"--- Debugging Lens Aspect Ratio ---")
+
+        # Check if LENS mask exists in the dictionary
+        if "LENS" not in seg_dict or not isinstance(seg_dict.get("LENS"), np.ndarray):
+            print(f"\tWARNING: LENS segmentation not found or not a numpy array in seg_dict.")
+            return 0.0, True # Return 0 and mark as NaN
+
+        lens_mask = seg_dict["LENS"]
+        print(f"\tInput LENS mask: Sum={np.sum(lens_mask)}, Shape={lens_mask.shape}, Dtype={lens_mask.dtype}")
+        print(f"\tInput vx_size: {vx_size}")
+
+        # Ensure mask is uint8 as expected by the core function's internal checks/casting
+        if lens_mask.dtype != np.uint8:
+             print(f"\tCasting LENS mask from {lens_mask.dtype} to uint8.")
+             lens_mask = lens_mask.astype(np.uint8)
+             # Re-check sum after casting
+             if np.sum(lens_mask) == 0:
+                  print(f"\tWARNING: LENS mask became empty after casting to uint8.")
+                  return 0.0, True
+
+        if np.sum(lens_mask) == 0: # Check if mask is empty
+            print(f"\tWARNING: LENS mask is empty.")
+            return 0.0, True
+
+        try:
+            # Call the actual calculation function from mriqc_metrics.py
+            aspect_ratio = lens_aspect_ratio(lens_mask, vx_size)
+            print(f"\tCalculated Lens Aspect Ratio: {aspect_ratio}")
+
+            if np.isnan(aspect_ratio):
+                isnan = True
+                # The core function already returns np.nan, so this might be redundant
+                # but good for explicit handling.
+                # If it's NaN, the main loop will convert it to 0.0 and set _nan=True.
+            # No need to set aspect_ratio = 0.0 here if isnan, main loop handles it.
+
+        except Exception as e:
+            print(f"\tERROR: Failed calculating lens aspect ratio via wrapper: {e}")
+            import traceback
+            traceback.print_exc()
+            aspect_ratio = np.nan # Ensure it's NaN on error
+            isnan = True
+
+        print(f"--- End Lens Aspect Ratio Debug ---")
+        # Return the calculated value (or NaN) and the isnan flag
+        return aspect_ratio, isnan
+
+    def _seg_globe_sphericity(self, seg_dict, vx_size, **kwargs):
+        """
+        Wrapper to calculate globe sphericity using pre-loaded segmentation data.
+        """
+        isnan = False
+        print(f"--- Debugging Sphericity ---")
+
+        # --- More detailed check ---
+        print(f"\tChecking seg_dict type: {type(seg_dict)}")
+        if isinstance(seg_dict, dict):
+             print(f"\tseg_dict keys: {list(seg_dict.keys())}")
+             globe_mask = seg_dict.get("GLOBE") # Use .get() for safer access
+             print(f"\tType of seg_dict['GLOBE']: {type(globe_mask)}")
+        else:
+             print(f"\tERROR: seg_dict is not a dictionary!")
+             globe_mask = None
+
+        # Check if the mask exists AND is a numpy array AND has non-zero sum
+        if not isinstance(globe_mask, np.ndarray) or np.sum(globe_mask) == 0:
+            print(f"\tWARNING: GLOBE mask is not a valid ndarray or is empty. Sum={np.sum(globe_mask) if isinstance(globe_mask, np.ndarray) else 'N/A'}")
+            return 0.0, True # Return 0 and mark as NaN
+        # --- End Detailed Check ---
+
+        # If we get here, globe_mask is a non-empty numpy array
+        print(f"\tInput GLOBE mask: Sum={np.sum(globe_mask)}, Shape={globe_mask.shape}, Dtype={globe_mask.dtype}")
+        print(f"\tInput vx_size: {vx_size}")
+
+        # Explicitly cast to uint8
+        if globe_mask.dtype != np.uint8:
+             print(f"\tCasting GLOBE mask from {globe_mask.dtype} to uint8.")
+             globe_mask = globe_mask.astype(np.uint8)
+             # Re-check sum after casting in case of issues
+             if np.sum(globe_mask) == 0:
+                  print(f"\tWARNING: GLOBE mask became empty after casting to uint8.")
+                  return 0.0, True
+
+        try:
+            # Call the actual calculation function
+            sphericity = globe_sphericity(globe_mask, vx_size)
+            print(f"\tCalculated Sphericity: {sphericity}")
+
+            if np.isnan(sphericity):
+                isnan = True
+                sphericity = 0.0
+        except Exception as e:
+            print(f"\tERROR: Failed calculating sphericity via wrapper: {e}")
+            import traceback
+            traceback.print_exc()
+            sphericity = 0.0
+            isnan = True
+
+        print(f"--- End Sphericity Debug ---")
+        value_to_return = 0.0 if isnan else sphericity
+        return value_to_return, isnan
+    def _get_voxel_size(self, vx_size, **kwargs):
+        """
+        Returns the voxel size passed during metric evaluation.
+        Note: Returns the list [vx, vy, vz]. The original 'im_size' IQM
+                might have expected separate x, y, z, etc. This needs
+                adjustment if individual dimensions are required as separate IQMs.
+        """
+        # vx_size is expected to be a list like [0.8, 0.8, 0.8]
+        # For now, return the list directly. Needs flattening if individual IQMs are needed.
+        # Returning a dummy value and NaN status for compatibility for now.
+        # Proper handling would involve splitting vx_size into x, y, z components
+        # and potentially adding image dimensions if needed, then updating definitions.py
+        # For simplicity, let's just return a known value (e.g., product) and False for NaN
+        if vx_size is None or not isinstance(vx_size, (list, tuple, np.ndarray)) or len(vx_size) != 3:
+                print("\tWARNING: Invalid vx_size encountered in _get_voxel_size.")
+                return 0.0, True # Return 0 and indicate NaN
+
+        # Example: return voxel volume, needs update if individual dims are needed
+        value = float(np.prod(vx_size))
+        return value, np.isnan(value)
 
     def get_all_metrics(self):
         return list(self.metrics_func.keys())
@@ -561,7 +877,7 @@ class SRMetrics:
         maskc = crop_stack(mask_ni, mask_ni)
         return imagec, maskc, seg_dict
 
-    def _load_and_prep_nifti(self, sr_path, mask_path, seg_path, resample_to):
+    '''def _load_and_prep_nifti(self, sr_path, mask_path, seg_path, resample_to):
         image_ni = ni.load(sr_path)
         # zero_fill the Nan values
         image_ni = ni.Nifti1Image(
@@ -589,7 +905,71 @@ class SRMetrics:
             seg_dict = {
                 k: squeeze_flip_tr(v.get_fdata()) for k, v in seg_dict.items()
             }
-        return imagec, maskc, seg_dict
+        return imagec, maskc, seg_dict'''
+
+    def _load_and_prep_nifti(self, sr_path, mask_path, seg_path, resample_to):
+        # Load initial images
+        image_ni = ni.load(sr_path)
+        # zero_fill the Nan values
+        image_ni = ni.Nifti1Image(
+            np.nan_to_num(image_ni.get_fdata()),
+            image_ni.affine,
+            image_ni.header,
+        )
+        mask_ni = ni.load(mask_path) # Will load the seg file if mask path points to it
+        seg_ni_orig = ni.load(seg_path) # Load the original segmentation
+
+        # Create combined mask: Use loaded mask + binarized segmentation
+        # Ensure mask_ni is treated as binary if it's the same as seg_ni_orig
+        if mask_path == seg_path:
+             mask_data_for_combine = (mask_ni.get_fdata() > 0).astype(int)
+        else:
+             mask_data_for_combine = mask_ni.get_fdata()
+
+        # Combine and clip
+        mask_combined_data = np.clip(
+            mask_data_for_combine + (seg_ni_orig.get_fdata() > 0).astype(int), 0, 1
+        )
+        # Use combined mask with original mask's affine/header for consistency before preprocessing
+        mask_ni_combined = ni.Nifti1Image(mask_combined_data, mask_ni.affine, mask_ni.header)
+
+        # Preprocess image, combined mask, and segmentation
+        # Pass the original seg_path to _preprocess_nifti, it handles loading/mapping/resampling seg internally
+        imagec_ni, maskc_ni, seg_dict_ni = self._preprocess_nifti(
+            image_ni, mask_ni_combined, seg_path, resample_to, robust=self.robust_prepro, bias_corr=self.correct_bias
+        )
+        # Note: _preprocess_nifti now returns NIfTI objects after cropping
+
+        # Convert final cropped outputs to numpy arrays with correct orientation
+        def squeeze_flip_tr(nifti_obj):
+            """Squeeze_dim returns a numpy array"""
+            if nifti_obj is None: return None
+            # Make sure data is loaded if it's a proxy
+            data = np.asanyarray(nifti_obj.dataobj)
+            return squeeze_dim(data, -1)[::-1, ::-1, ::-1].transpose(2, 1, 0)
+
+        imagec_np = squeeze_flip_tr(imagec_ni)
+        maskc_np = squeeze_flip_tr(maskc_ni)
+        # Apply squeeze_flip_tr to the data within the NIfTI objects in seg_dict_ni
+        seg_dict_np = {
+            k: squeeze_flip_tr(v_ni) for k, v_ni in seg_dict_ni.items() if v_ni is not None
+        }
+
+        # <<< --- START DEBUG BLOCK --- >>>
+        print(f"\n--- Debugging _load_and_prep_nifti Results for SR: {sr_path} ---")
+        print(f"Image Cropped Shape: {imagec_np.shape if imagec_np is not None else 'None'}")
+        print(f"Mask Cropped Shape: {maskc_np.shape if maskc_np is not None else 'None'}")
+        print(f"Seg Dict Keys: {list(seg_dict_np.keys())}")
+        for k, v_np in seg_dict_np.items():
+             if v_np is not None:
+                  print(f"Tissue '{k}': Sum = {np.sum(v_np)}, Shape = {v_np.shape}, Dtype = {v_np.dtype}")
+             else:
+                  print(f"Tissue '{k}': Mask is None")
+        print(f"--- End Debugging --- \n")
+        # <<< --- END DEBUG BLOCK --- >>>
+
+        # Return numpy arrays
+        return imagec_np, maskc_np, seg_dict_np
 
     def _remove_empty_slices(self, image, mask):
         s = np.flatnonzero(
@@ -661,14 +1041,77 @@ class SRMetrics:
         elif reduction == "median":
             return np.median(metric_out), isnan
 
-    def _seg_sstats(self, image, segmentation):
+    '''    def _seg_sstats(self, image, segmentation):
         self._sstats = summary_stats(image, segmentation)
+        return self._sstats'''
+    # Inside SRMetrics class
+    def _seg_sstats(self, image, seg_dict, **kwargs):
+        print("--- Debugging SStats ---")
+        segmentation_uint8 = {}
+        valid_masks = True
+        for k, mask_float in seg_dict.items():
+            if not isinstance(mask_float, np.ndarray):
+                print(f"\tWARNING: Mask for {k} is not a numpy array in seg_dict.")
+                valid_masks = False
+                break
+            print(f"\tSStats Input {k}: Sum={np.sum(mask_float)}, Dtype={mask_float.dtype}")
+            segmentation_uint8[k] = mask_float.astype(np.uint8)
+            if np.sum(segmentation_uint8[k]) == 0:
+                print(f"\tWARNING: Mask for {k} is empty after casting.")
+                # Decide how to handle - maybe skip stats for this tissue?
+                # Or allow summary_stats to potentially handle empty weights?
+
+        if not valid_masks:
+            # Return NaN for all expected outputs if any mask was invalid
+            # Need to construct the expected dictionary structure with NaNs
+            # This part depends on how get_nan_output is structured for seg_sstats
+            print("\tERROR: Invalid masks found, returning NaN for sstats.")
+            return self.get_nan_output("seg_sstats") # Assuming this returns the dict structure with NaNs
+
+        try:
+            # Pass the dictionary with uint8 masks
+            self._sstats = summary_stats(image, segmentation_uint8)
+            print(f"\tSummary Stats Calculated: {list(self._sstats.keys())}")
+        except Exception as e:
+            print(f"\tERROR calculating summary_stats: {e}")
+            import traceback
+            traceback.print_exc()
+            self._sstats = self.get_nan_output("seg_sstats") # Return structure with NaNs
+
+        print("--- End SStats Debug ---")
+        # The evaluate_metrics loop handles flattening and NaN flags
         return self._sstats
+    '''    def _seg_volume(self, image, segmentation):
+        return volume_fraction(segmentation)'''
+    
+    def _seg_volume(self, seg_dict, **kwargs):
+        print("--- Debugging Volume ---")
+        segmentation_uint8 = {}
+        valid_masks = True
+        for k, mask_float in seg_dict.items():
+            if not isinstance(mask_float, np.ndarray):
+                print(f"\tWARNING: Mask for {k} is not a numpy array.")
+                valid_masks = False
+                break
+            print(f"\tVolume Input {k}: Sum={np.sum(mask_float)}, Dtype={mask_float.dtype}")
+            segmentation_uint8[k] = mask_float.astype(np.uint8)
 
-    def _seg_volume(self, image, segmentation):
-        return volume_fraction(segmentation)
+        if not valid_masks:
+            print("\tERROR: Invalid masks found, returning NaN for volume.")
+            return self.get_nan_output("seg_volume")
 
-    def _seg_snr(self, image, segmentation):
+        try:
+            vol_frac = volume_fraction(segmentation_uint8)
+            print(f"\tVolume Fractions Calculated: {vol_frac}")
+        except Exception as e:
+            print(f"\tERROR calculating volume_fraction: {e}")
+            import traceback
+            traceback.print_exc()
+            vol_frac = self.get_nan_output("seg_volume")
+
+        print("--- End Volume Debug ---")
+        return vol_frac
+    '''    def _seg_snr(self, image, segmentation):
         if self._sstats is None:
             self._sstats = summary_stats(image, segmentation)
         snr_dict = {}
@@ -679,41 +1122,190 @@ class SRMetrics:
                 self._sstats[tlabel]["n"],
             )
         snr_dict["total"] = float(np.mean(list(snr_dict.values())))
+        return snr_dict'''
+
+    # Inside SRMetrics class
+    def _seg_snr(self, image, seg_dict, **kwargs): # Added image, seg_dict args
+        print("--- Debugging SNR ---")
+        # Ensure sstats are calculated (and handle potential previous errors)
+        if self._sstats is None or not isinstance(self._sstats, dict) or not self._sstats:
+            print("\tWARNING: _sstats not available or invalid, attempting recalculation.")
+            # Use the already prepared uint8 casting logic from _seg_sstats if possible
+            # Or recalculate here, ensuring uint8 casting
+            self._sstats = self._seg_sstats(image, seg_dict, **kwargs) # Recalculate
+            if not isinstance(self._sstats, dict) or not self._sstats:
+                print("\tERROR: Failed to get valid _sstats for SNR calculation.")
+                return self.get_nan_output("seg_snr") # Return NaN structure
+
+        snr_dict = {}
+        all_snr_nan = True
+        for tlabel in seg_dict.keys(): # Iterate through expected labels
+            # Check if stats exist for this label
+            if tlabel not in self._sstats or not isinstance(self._sstats[tlabel], dict):
+                print(f"\tWARNING: Stats for {tlabel} not found in _sstats for SNR.")
+                snr_dict[tlabel] = np.nan
+                continue # Skip calculation for this label
+
+            stats = self._sstats[tlabel]
+            # Check for necessary keys within the stats
+            if not all(k in stats for k in ["median", "stdv", "n"]):
+                print(f"\tWARNING: Missing required keys in stats for {tlabel}.")
+                snr_dict[tlabel] = np.nan
+                continue
+
+            try:
+                # Calculate SNR using the function from mriqc_metrics
+                snr_val = snr(
+                    stats["median"],
+                    stats["stdv"],
+                    stats["n"],
+                )
+                snr_dict[tlabel] = snr_val
+                if not np.isnan(snr_val):
+                    all_snr_nan = False
+                print(f"\tSNR {tlabel}: {snr_val}")
+            except Exception as e:
+                print(f"\tERROR calculating SNR for {tlabel}: {e}")
+                snr_dict[tlabel] = np.nan
+
+        # Calculate total SNR
+        valid_snrs = [v for v in snr_dict.values() if not np.isnan(v)]
+        if valid_snrs:
+            snr_dict["total"] = float(np.mean(valid_snrs))
+            all_snr_nan = False
+        else:
+            snr_dict["total"] = np.nan
+
+        print(f"\tSNR Total: {snr_dict.get('total', 'N/A')}")
+        print("--- End SNR Debug ---")
+
+        # Return the dictionary, NaNs will be handled by the main loop
         return snr_dict
 
-    def _seg_cnr(self, image, segmentation):
+    '''    def _seg_cnr(self, image, segmentation):
         if self._sstats is None:
             self._sstats = summary_stats(image, segmentation)
         out = cnr(
-            self._sstats["WM"]["median"],
-            self._sstats["GM"]["median"],
-            self._sstats["WM"]["stdv"],
-            self._sstats["GM"]["stdv"],
+            self._sstats["LENS"]["median"],
+            self._sstats["GLOBE"]["median"],
+            self._sstats["LENS"]["stdv"],
+            self._sstats["GLOBE"]["stdv"],
         )
         is_nan = np.isnan(out)
+        return 0.0 if is_nan else out, is_nan'''
+
+    # Inside SRMetrics class
+    def _seg_cnr(self, image, seg_dict, **kwargs): # Added args
+        print("--- Debugging CNR ---")
+        # Ensure sstats are calculated correctly first
+        if self._sstats is None or not isinstance(self._sstats, dict) or not self._sstats:
+            print("\tWARNING: _sstats not available or invalid for CNR, attempting recalculation.")
+            self._sstats = self._seg_sstats(image, seg_dict, **kwargs) # Recalculate
+            if not isinstance(self._sstats, dict) or not self._sstats:
+                print("\tERROR: Failed to get valid _sstats for CNR calculation.")
+                return np.nan, True # Return NaN and True flag
+
+        # Check if LENS and GLOBE stats exist and are valid dictionaries
+        if not all(k in self._sstats and isinstance(self._sstats[k], dict) for k in ["LENS", "GLOBE"]):
+            print("\tWARNING: LENS or GLOBE statistics not found/valid in _sstats for CNR calculation.")
+            return np.nan, True
+
+        # Check for necessary keys within LENS and GLOBE stats
+        required_keys = ["median", "stdv"]
+        if not all(key in self._sstats["LENS"] for key in required_keys) or \
+        not all(key in self._sstats["GLOBE"] for key in required_keys):
+            print("\tWARNING: Missing 'median' or 'stdv' in LENS/GLOBE stats for CNR.")
+            return np.nan, True
+
+        try:
+            out = cnr(
+                self._sstats["LENS"]["median"],   # Correct key
+                self._sstats["GLOBE"]["median"],  # Correct key
+                self._sstats["LENS"]["stdv"],     # Correct key
+                self._sstats["GLOBE"]["stdv"],    # Correct key
+            )
+            is_nan = np.isnan(out)
+            print(f"\tCalculated CNR: {out}")
+        except Exception as e:
+            print(f"\tERROR calculating CNR: {e}")
+            import traceback
+            traceback.print_exc()
+            out = np.nan
+            is_nan = True
+
+        print("--- End CNR Debug ---")
+        # Return 0 if NaN, otherwise the value, plus NaN flag
         return 0.0 if is_nan else out, is_nan
 
-    def _seg_cjv(self, image, segmentation):
+    '''    def _seg_cjv(self, image, segmentation):
         if self._sstats is None:
             self._sstats = summary_stats(image, segmentation)
         out = cjv(
             # mu_wm, mu_gm, sigma_wm, sigma_gm
-            self._sstats["WM"]["median"],
-            self._sstats["GM"]["median"],
-            self._sstats["WM"]["mad"],
-            self._sstats["GM"]["mad"],
+            self._sstats["LENS"]["median"],
+            self._sstats["GLOBE"]["median"],
+            self._sstats["LENS"]["mad"],
+            self._sstats["GLOBE"]["mad"],
         )
         is_nan = np.isnan(out)
-        return 1000 if is_nan else out, is_nan
+        return 1000 if is_nan else out, is_nan'''
+    
+    # Inside SRMetrics class
+    def _seg_cjv(self, image, seg_dict, **kwargs): # Added args
+        print("--- Debugging CJV ---")
+        # Ensure sstats are calculated correctly first
+        if self._sstats is None or not isinstance(self._sstats, dict) or not self._sstats:
+            print("\tWARNING: _sstats not available or invalid for CJV, attempting recalculation.")
+            self._sstats = self._seg_sstats(image, seg_dict, **kwargs) # Recalculate
+            if not isinstance(self._sstats, dict) or not self._sstats:
+                print("\tERROR: Failed to get valid _sstats for CJV calculation.")
+                return np.nan, True # Return NaN and True flag
 
-    def _seg_wm2max(self, image, segmentation):
-        if self._sstats is None:
-            self._sstats = summary_stats(image, segmentation)
-        out = wm2max(image, self._sstats["WM"]["median"])
-        is_nan = np.isnan(out)
-        return 0.0 if is_nan else out, is_nan
+        # Check if LENS and GLOBE stats exist and are valid dictionaries
+        if not all(k in self._sstats and isinstance(self._sstats[k], dict) for k in ["LENS", "GLOBE"]):
+            print("\tWARNING: LENS or GLOBE statistics not found/valid in _sstats for CJV calculation.")
+            return np.nan, True
 
-    def _seg_topology(self, image, segmentation):
+        # Check for necessary keys within LENS and GLOBE stats (using MAD here based on original code)
+        required_keys = ["median", "mad"] # Original CJV used MAD, ensure it's calculated in summary_stats
+        if not all(key in self._sstats["LENS"] for key in required_keys) or \
+        not all(key in self._sstats["GLOBE"] for key in required_keys):
+            print("\tWARNING: Missing 'median' or 'mad' in LENS/GLOBE stats for CJV.")
+            # Fallback to stdv if mad is missing? Or return NaN? Let's return NaN for now.
+            # Alternatively, modify summary_stats to ensure 'mad' is always present or use 'stdv' here.
+            # Check your summary_stats implementation if 'mad' calculation might fail.
+            return np.nan, True
+
+        try:
+            # Using MAD based on original implementation of CJV
+            out = cjv(
+                self._sstats["LENS"]["median"],   # Correct key
+                self._sstats["GLOBE"]["median"],  # Correct key
+                self._sstats["LENS"]["mad"],      # Using MAD
+                self._sstats["GLOBE"]["mad"],     # Using MAD
+            )
+            is_nan = np.isnan(out)
+            print(f"\tCalculated CJV: {out}")
+        except Exception as e:
+            print(f"\tERROR calculating CJV: {e}")
+            import traceback
+            traceback.print_exc()
+            out = np.nan
+            is_nan = True
+
+        print("--- End CJV Debug ---")
+        # Return default value if NaN (original code returned 1000 for NaN), plus NaN flag
+        default_cjv = 1000.0 # Match original behavior on NaN if desired
+        return default_cjv if is_nan else out, is_nan
+
+    # def _seg_wm2max(self, image, segmentation):
+    #     if self._sstats is None:
+    #         self._sstats = summary_stats(image, segmentation)
+    #     out = wm2max(image, self._sstats["WM"]["median"])
+    #     is_nan = np.isnan(out)
+    #     return 0.0 if is_nan else out, is_nan
+
+    '''    def _seg_topology(self, image, segmentation):
         topo_dict = {}
         
         for tlabel in segmentation.keys():
@@ -734,7 +1326,93 @@ class SRMetrics:
         topo_dict["mask_b2"] = betti_numbers[1]
         topo_dict["mask_b3"] = betti_numbers[2]
         topo_dict["mask_ec"] = ec
-        return topo_dict
+        return topo_dict'''
+    
+    def _seg_topology(self, seg_dict, **kwargs):
+        print(f"--- Debugging Topology ---")
+        # Ensure compute_topological_features is imported if not already at top
+        # from .utils import compute_topological_features
+
+        segmentation = seg_dict # Use the passed dictionary
+
+        topo_keys = ["b1", "b2", "b3", "ec"]
+        all_metric_keys = {} # Initialize empty dictionary
+
+        # Process individual tissue masks
+        processed_labels = list(segmentation.keys())
+        for tlabel in processed_labels:
+            # Initialize metrics for this label with 0
+            for tk in topo_keys:
+                all_metric_keys[f"{tlabel}_{tk}"] = 0
+
+            current_mask_float = segmentation.get(tlabel)
+
+            if not isinstance(current_mask_float, np.ndarray):
+                print(f"\tWARNING: Mask for {tlabel} is not a numpy array. Skipping topology.")
+                continue
+
+            # --- Explicitly cast to uint8 ---
+            if current_mask_float.dtype != np.uint8:
+                current_mask = current_mask_float.astype(np.uint8)
+            else:
+                current_mask = current_mask_float
+
+            if np.sum(current_mask) == 0:
+                print(f"\tSkipping topology for empty mask {tlabel}.")
+                continue # Skip, leaving the initialized 0s
+
+            # --- Call compute_topological_features ---
+            try:
+                # compute_topological_features now returns integers or 0s on error
+                betti_numbers, ec = compute_topological_features(current_mask)
+                print(f"\tTissue {tlabel}: Betti={betti_numbers}, EC={ec}")
+                # Assign results (already integers or 0)
+                all_metric_keys[f"{tlabel}_b1"] = betti_numbers[0]
+                all_metric_keys[f"{tlabel}_b2"] = betti_numbers[1]
+                all_metric_keys[f"{tlabel}_b3"] = betti_numbers[2]
+                all_metric_keys[f"{tlabel}_ec"] = ec
+            except Exception as e:
+                # This exception block might be redundant if utils handles it, but keep for safety
+                print(f"\tERROR assigning topology results for {tlabel}: {e}")
+                # Values remain 0 as initialized
+
+        # Process combined mask topology
+        # Initialize combined mask metrics with 0
+        for tk in topo_keys:
+            all_metric_keys[f"mask_{tk}"] = 0
+
+        try:
+            first_key = list(segmentation.keys())[0]
+            combined_mask = np.zeros_like(segmentation[first_key], dtype=np.uint8)
+            for tlabel in segmentation.keys():
+                mask_to_add = segmentation.get(tlabel)
+                if isinstance(mask_to_add, np.ndarray):
+                    if mask_to_add.dtype != np.uint8:
+                        mask_to_add = mask_to_add.astype(np.uint8)
+                    combined_mask += mask_to_add
+            combined_mask = np.clip(combined_mask, 0, 1)
+
+            if np.sum(combined_mask) > 0:
+                # --- Call compute_topological_features for combined mask ---
+                betti_numbers, ec = compute_topological_features(combined_mask)
+                print(f"\tCombined Mask: Betti={betti_numbers}, EC={ec}")
+                # Assign results (already integers or 0)
+                all_metric_keys["mask_b1"] = betti_numbers[0]
+                all_metric_keys["mask_b2"] = betti_numbers[1]
+                all_metric_keys["mask_b3"] = betti_numbers[2]
+                all_metric_keys["mask_ec"] = ec
+            else:
+                print(f"\tSkipping topology for empty combined mask")
+                # Values remain 0 as initialized
+
+        except Exception as e:
+            print(f"\tERROR creating or assigning topology for combined mask: {e}")
+            # Values remain 0 as initialized
+
+        print(f"--- End Topology Debug ---")
+
+        # Return dictionary containing only integers (or 0 for failures)
+        return all_metric_keys
 
     def preprocess_and_evaluate_metric(
         self,

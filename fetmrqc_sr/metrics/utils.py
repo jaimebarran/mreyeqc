@@ -356,7 +356,7 @@ def ssim(x, x_ref, mask=None, datarange=None):
     return pick_ssim(ssim, mask)
 
 
-def compute_topological_features(map):
+'''def compute_topological_features(map):
     """
     Evaluate the topology of a given map.
 
@@ -382,4 +382,70 @@ def compute_topological_features(map):
     betti_number_2dim = pairs_nda[0][0].shape[0]
     betti_number_list = [betti_number_0dim, betti_number_1dim, betti_number_2dim]
     ec = int(betti_number_0dim) - int(betti_number_1dim) + int(betti_number_2dim)
-    return betti_number_list, ec
+    return betti_number_list, ec'''
+
+def compute_topological_features(map):
+    """
+    Evaluate the topology of a given map.
+
+    Parameters:
+    - map: A 3D numpy array representing the map (should be integer/bool type).
+
+    Returns:
+    - A tuple containing the Betti numbers ([b0, b1, b2]) and the Euler characteristic (ec).
+      Returns NaNs if calculation fails.
+
+    From https://github.com/smilell/Topology-Evaluation/blob/main/evaluation.py
+    Authors: Liu Li, Priscille de Dumast
+
+    Modified for robustness.
+    """
+    # Ensure input is suitable for Gudhi 
+    if map.dtype not in [np.bool_, np.uint8, np.int8, np.int16, np.int32, np.int64]:
+         print(f"Warning: Topology input map dtype is {map.dtype}. Casting to bool.")
+         map = map.astype(np.bool_)
+
+    try:
+        import gudhi as gd # Moved import inside function for safety
+        # Betti number computation
+        # Ensure data is F-contiguous as expected by Gudhi's flatten
+        if not map.flags['F_CONTIGUOUS']:
+             map_f_contiguous = np.asfortranarray(map)
+        else:
+             map_f_contiguous = map
+
+        cubic = gd.CubicalComplex(dimensions=map_f_contiguous.shape,
+                                  top_dimensional_cells=map_f_contiguous.flatten(order='F'))
+
+        # Persistence calculation (adjust min_persistence if needed)
+        cubic.persistence(homology_coeff_field=2, min_persistence=0.00)
+        # pairs_nda = cubic.cofaces_of_persistence_pairs() # Original call
+        # Use persistence_intervals_in_dimension instead for more direct Betti access
+        # Betti_n = number of intervals [birth, inf) in dimension n
+
+        b0_intervals = cubic.persistence_intervals_in_dimension(0)
+        b1_intervals = cubic.persistence_intervals_in_dimension(1)
+        b2_intervals = cubic.persistence_intervals_in_dimension(2)
+
+        # Count infinite intervals for Betti numbers
+        # Interval is [birth, death]. inf is represented by float('inf') or a very large number
+        # depending on Gudhi version, check for >= large finite number or infinity.
+        inf_val = float('inf')
+        betti_number_0dim = np.sum(b0_intervals[:, 1] == inf_val) if b0_intervals.size > 0 else 0
+        betti_number_1dim = np.sum(b1_intervals[:, 1] == inf_val) if b1_intervals.size > 0 else 0
+        betti_number_2dim = np.sum(b2_intervals[:, 1] == inf_val) if b2_intervals.size > 0 else 0
+
+        betti_number_list = [int(betti_number_0dim), int(betti_number_1dim), int(betti_number_2dim)]
+        ec = betti_number_0dim - betti_number_1dim + betti_number_2dim
+        return betti_number_list, int(ec)
+
+    except ImportError:
+        print("ERROR: Gudhi library not found. Cannot compute topology.")
+        # Return default integers instead of NaNs
+        return [0, 0, 0], 0
+    except Exception as e:
+        print(f"ERROR during topology calculation: {e}")
+        import traceback
+        traceback.print_exc()
+        # Return default integers instead of NaNs
+        return [0, 0, 0], 0

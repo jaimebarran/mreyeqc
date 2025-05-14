@@ -91,6 +91,7 @@ def main():
             "noise",
             "intensity_gm",
             "intensity_dgm",
+            "rating",
         ]
     )
 

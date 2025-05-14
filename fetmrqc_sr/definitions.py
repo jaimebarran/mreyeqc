@@ -14,10 +14,76 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# fetmrqc_sr/definitions.py
+
 import os
 
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__)) 
+# Adapted list of IQMs for Eye Tissue Analysis
+IQMS = [
 
+    # # --- Non-Segmentation Metrics ---
+    # 'centroid', 'rank_error', 'rank_error_relative', 'mask_volume',
+    # 'ncc_window', 'ncc_median',
+    # 'joint_entropy_window', 'joint_entropy_median',
+    # 'mi_window', 'mi_median',
+    # 'nmi_window', 'nmi_median',
+    # 'shannon_entropy',
+    # 'psnr_window',
+    # 'nrmse_window', 'rmse_window',
+    # 'nmae_window', 'mae_window',
+    # 'ssim_window',
+    # 'mean', 'std', 'median', 'percentile_5', 'percentile_95',
+    # 'kurtosis', 'variation',
+    # 'filter_laplace', 'filter_sobel',
 
-IQMS = ['centroid', 'centroid_nan', 'rank_error', 'rank_error_nan', 'rank_error_relative', 'rank_error_relative_nan', 'mask_volume', 'mask_volume_nan', 'ncc_window', 'ncc_window_nan', 'ncc_median', 'ncc_median_nan', 'joint_entropy_window', 'joint_entropy_window_nan', 'joint_entropy_median', 'joint_entropy_median_nan', 'mi_window', 'mi_window_nan', 'mi_median', 'mi_median_nan', 'nmi_window', 'nmi_window_nan', 'nmi_median', 'nmi_median_nan', 'shannon_entropy', 'shannon_entropy_nan', 'psnr_window', 'psnr_window_nan', 'nrmse_window', 'nrmse_window_nan', 'rmse_window', 'rmse_window_nan', 'nmae_window', 'nmae_window_nan', 'mae_window', 'mae_window_nan', 'ssim_window', 'ssim_window_nan', 'mean', 'mean_nan', 'std', 'std_nan', 'median', 'median_nan', 'percentile_5', 'percentile_5_nan', 'percentile_95', 'percentile_95_nan', 'kurtosis', 'kurtosis_nan', 'variation', 'variation_nan', 'filter_laplace', 'filter_laplace_nan', 'filter_sobel', 'filter_sobel_nan', 'seg_sstats_CSF_mean', 'seg_sstats_CSF_mean_nan', 'seg_sstats_CSF_median', 'seg_sstats_CSF_median_nan', 'seg_sstats_CSF_p95', 'seg_sstats_CSF_p95_nan', 'seg_sstats_CSF_p05', 'seg_sstats_CSF_p05_nan', 'seg_sstats_CSF_k', 'seg_sstats_CSF_k_nan', 'seg_sstats_CSF_stdv', 'seg_sstats_CSF_stdv_nan', 'seg_sstats_CSF_mad', 'seg_sstats_CSF_mad_nan', 'seg_sstats_CSF_n', 'seg_sstats_CSF_n_nan', 'seg_sstats_GM_mean', 'seg_sstats_GM_mean_nan', 'seg_sstats_GM_median', 'seg_sstats_GM_median_nan', 'seg_sstats_GM_p95', 'seg_sstats_GM_p95_nan', 'seg_sstats_GM_p05', 'seg_sstats_GM_p05_nan', 'seg_sstats_GM_k', 'seg_sstats_GM_k_nan', 'seg_sstats_GM_stdv', 'seg_sstats_GM_stdv_nan', 'seg_sstats_GM_mad', 'seg_sstats_GM_mad_nan', 'seg_sstats_GM_n', 'seg_sstats_GM_n_nan', 'seg_sstats_WM_mean', 'seg_sstats_WM_mean_nan', 'seg_sstats_WM_median', 'seg_sstats_WM_median_nan', 'seg_sstats_WM_p95', 'seg_sstats_WM_p95_nan', 'seg_sstats_WM_p05', 'seg_sstats_WM_p05_nan', 'seg_sstats_WM_k', 'seg_sstats_WM_k_nan', 'seg_sstats_WM_stdv', 'seg_sstats_WM_stdv_nan', 'seg_sstats_WM_mad', 'seg_sstats_WM_mad_nan', 'seg_sstats_WM_n', 'seg_sstats_WM_n_nan', 'seg_sstats_BS_mean', 'seg_sstats_BS_mean_nan', 'seg_sstats_BS_median', 'seg_sstats_BS_median_nan', 'seg_sstats_BS_p95', 'seg_sstats_BS_p95_nan', 'seg_sstats_BS_p05', 'seg_sstats_BS_p05_nan', 'seg_sstats_BS_k', 'seg_sstats_BS_k_nan', 'seg_sstats_BS_stdv', 'seg_sstats_BS_stdv_nan', 'seg_sstats_BS_mad', 'seg_sstats_BS_mad_nan', 'seg_sstats_BS_n', 'seg_sstats_BS_n_nan', 'seg_sstats_CBM_mean', 'seg_sstats_CBM_mean_nan', 'seg_sstats_CBM_median', 'seg_sstats_CBM_median_nan', 'seg_sstats_CBM_p95', 'seg_sstats_CBM_p95_nan', 'seg_sstats_CBM_p05', 'seg_sstats_CBM_p05_nan', 'seg_sstats_CBM_k', 'seg_sstats_CBM_k_nan', 'seg_sstats_CBM_stdv', 'seg_sstats_CBM_stdv_nan', 'seg_sstats_CBM_mad', 'seg_sstats_CBM_mad_nan', 'seg_sstats_CBM_n', 'seg_sstats_CBM_n_nan', 'seg_volume_CSF', 'seg_volume_CSF_nan', 'seg_volume_GM', 'seg_volume_GM_nan', 'seg_volume_WM', 'seg_volume_WM_nan', 'seg_volume_BS', 'seg_volume_BS_nan', 'seg_volume_CBM', 'seg_volume_CBM_nan', 'seg_snr_CSF', 'seg_snr_CSF_nan', 'seg_snr_GM', 'seg_snr_GM_nan', 'seg_snr_WM', 'seg_snr_WM_nan', 'seg_snr_BS', 'seg_snr_BS_nan', 'seg_snr_CBM', 'seg_snr_CBM_nan', 'seg_snr_total', 'seg_snr_total_nan', 'seg_cnr', 'seg_cnr_nan', 'seg_cjv', 'seg_cjv_nan', 'seg_wm2max', 'seg_wm2max_nan', 'seg_topology_CSF_b1', 'seg_topology_CSF_b1_nan', 'seg_topology_CSF_b2', 'seg_topology_CSF_b2_nan', 'seg_topology_CSF_b3', 'seg_topology_CSF_b3_nan', 'seg_topology_CSF_ec', 'seg_topology_CSF_ec_nan', 'seg_topology_GM_b1', 'seg_topology_GM_b1_nan', 'seg_topology_GM_b2', 'seg_topology_GM_b2_nan', 'seg_topology_GM_b3', 'seg_topology_GM_b3_nan', 'seg_topology_GM_ec', 'seg_topology_GM_ec_nan', 'seg_topology_WM_b1', 'seg_topology_WM_b1_nan', 'seg_topology_WM_b2', 'seg_topology_WM_b2_nan', 'seg_topology_WM_b3', 'seg_topology_WM_b3_nan', 'seg_topology_WM_ec', 'seg_topology_WM_ec_nan', 'seg_topology_BS_b1', 'seg_topology_BS_b1_nan', 'seg_topology_BS_b2', 'seg_topology_BS_b2_nan', 'seg_topology_BS_b3', 'seg_topology_BS_b3_nan', 'seg_topology_BS_ec', 'seg_topology_BS_ec_nan', 'seg_topology_CBM_b1', 'seg_topology_CBM_b1_nan', 'seg_topology_CBM_b2', 'seg_topology_CBM_b2_nan', 'seg_topology_CBM_b3', 'seg_topology_CBM_b3_nan', 'seg_topology_CBM_ec', 'seg_topology_CBM_ec_nan', 'seg_topology_mask_b1', 'seg_topology_mask_b1_nan', 'seg_topology_mask_b2', 'seg_topology_mask_b2_nan', 'seg_topology_mask_b3', 'seg_topology_mask_b3_nan', 'seg_topology_mask_ec', 'seg_topology_mask_ec_nan']
+    # # --- Segmentation-Based Metrics  ---
+
+    # # Summary Stats (sstats) for each eye tissue
+    # 'seg_sstats_LENS_mean', 'seg_sstats_LENS_median', 'seg_sstats_LENS_p95', 'seg_sstats_LENS_p05', 'seg_sstats_LENS_k', 'seg_sstats_LENS_stdv', 'seg_sstats_LENS_mad', 'seg_sstats_LENS_n',
+    # 'seg_sstats_GLOBE_mean', 'seg_sstats_GLOBE_median', 'seg_sstats_GLOBE_p95', 'seg_sstats_GLOBE_p05', 'seg_sstats_GLOBE_k', 'seg_sstats_GLOBE_stdv', 'seg_sstats_GLOBE_mad', 'seg_sstats_GLOBE_n',
+    # 'seg_sstats_OPTIQUE_NERVE_mean', 'seg_sstats_OPTIQUE_NERVE_median', 'seg_sstats_OPTIQUE_NERVE_p95', 'seg_sstats_OPTIQUE_NERVE_p05', 'seg_sstats_OPTIQUE_NERVE_k', 'seg_sstats_OPTIQUE_NERVE_stdv', 'seg_sstats_OPTIQUE_NERVE_mad', 'seg_sstats_OPTIQUE_NERVE_n',
+    # 'seg_sstats_FAT_mean', 'seg_sstats_FAT_median', 'seg_sstats_FAT_p95', 'seg_sstats_FAT_p05', 'seg_sstats_FAT_k', 'seg_sstats_FAT_stdv', 'seg_sstats_FAT_mad', 'seg_sstats_FAT_n',
+    # 'seg_sstats_MUSCLE_mean', 'seg_sstats_MUSCLE_median', 'seg_sstats_MUSCLE_p95', 'seg_sstats_MUSCLE_p05', 'seg_sstats_MUSCLE_k', 'seg_sstats_MUSCLE_stdv', 'seg_sstats_MUSCLE_mad', 'seg_sstats_MUSCLE_n',
+
+    # # Volume Fraction for each eye tissue
+    # 'seg_volume_LENS', 'seg_volume_GLOBE', 'seg_volume_OPTIQUE_NERVE', 'seg_volume_FAT', 'seg_volume_MUSCLE',
+
+    # # Signal-to-Noise Ratio (SNR) for each eye tissue
+    # 'seg_snr_LENS', 'seg_snr_GLOBE', 'seg_snr_OPTIQUE_NERVE', 'seg_snr_FAT', 'seg_snr_MUSCLE',
+    # 'seg_snr_total',
+
+    # # Contrast-to-Noise Ratio (CNR - Adapted: LENS vs GLOBE)
+    # 'seg_cnr',
+
+    # # Coefficient of Joint Variation (CJV - Adapted: LENS vs GLOBE)
+    # 'seg_cjv',
+
+    # # Topology Features for each eye tissue and the combined mask
+    # 'seg_topology_LENS_b1', 'seg_topology_LENS_b2', 'seg_topology_LENS_b3', 'seg_topology_LENS_ec',
+    # 'seg_topology_GLOBE_b1', 'seg_topology_GLOBE_b2', 'seg_topology_GLOBE_b3', 'seg_topology_GLOBE_ec',
+    # 'seg_topology_OPTIQUE_NERVE_b1', 'seg_topology_OPTIQUE_NERVE_b2', 'seg_topology_OPTIQUE_NERVE_b3', 'seg_topology_OPTIQUE_NERVE_ec',
+    # 'seg_topology_FAT_b1', 'seg_topology_FAT_b2', 'seg_topology_FAT_b3', 'seg_topology_FAT_ec',
+    # 'seg_topology_MUSCLE_b1', 'seg_topology_MUSCLE_b2', 'seg_topology_MUSCLE_b3', 'seg_topology_MUSCLE_ec',
+    # 'seg_topology_mask_b1', 'seg_topology_mask_b2', 'seg_topology_mask_b3', 'seg_topology_mask_ec',
+
+    # # Custom Eye Metrics
+    # 'seg_globe_sphericity', 'seg_lens_aspect_ratio',
+    
+    'seg_snr_GLOBE',
+    'seg_cjv',
+    'seg_sstats_GLOBE_mad',
+    'seg_sstats_GLOBE_stdv',
+    'seg_sstats_GLOBE_k',
+    'seg_snr_total',
+    'seg_cnr',
+    'seg_sstats_GLOBE_p95',
+    'centroid_full',
+]
+
+# --- Add _nan versions for all metrics ---
+
+_IQMS_NO_NAN = IQMS[:] # Take a copy
+for iqm in _IQMS_NO_NAN:
+    IQMS.append(iqm + '_nan')

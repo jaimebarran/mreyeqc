@@ -25,7 +25,139 @@
 from scipy.stats import kurtosis  # pylint: disable=E0611
 import numpy as np
 from math import sqrt
+from skimage import measure 
 
+
+
+def globe_sphericity(globe_mask_data, voxel_spacing):
+    """
+    Calculates the sphericity of a given binary mask (assumed to be the globe).
+    Sphericity = (pi^(1/3) * (6 * Volume)^(2/3)) / SurfaceArea
+
+    Args:
+        globe_mask_data (np.ndarray): Binary numpy array of the globe segmentation.
+        voxel_spacing (tuple or list): Voxel dimensions (e.g., [0.8, 0.8, 0.8]).
+
+    Returns:
+        float: Sphericity value (between 0 and 1), or np.nan if calculation fails.
+    """
+    # Ensure voxel spacing has 3 dimensions
+    if len(voxel_spacing) < 3:
+        print(f"\tWARNING: Invalid voxel spacing provided for sphericity: {voxel_spacing}. Using [1,1,1].")
+        voxel_spacing = (1.0, 1.0, 1.0)
+    elif len(voxel_spacing) > 3:
+         voxel_spacing = voxel_spacing[:3] # Take only the first 3
+
+    # Check if the globe mask is empty
+    if np.sum(globe_mask_data) == 0:
+        print(f"\tWARNING: Empty globe mask provided for sphericity calculation.")
+        return np.nan
+
+    voxel_volume = np.prod(voxel_spacing)
+
+    # Calculate Volume
+    volume = np.sum(globe_mask_data) * voxel_volume
+
+    # Calculate Surface Area using marching cubes
+    try:
+        # Ensure data is integer type for marching cubes if needed, though bool often works
+        verts, faces, _, _ = measure.marching_cubes(
+            globe_mask_data.astype(np.uint8), level=0.5, spacing=voxel_spacing
+        )
+        surface_area = measure.mesh_surface_area(verts, faces)
+    except (ValueError, RuntimeError) as e:
+         print(f"\tWARNING: Marching cubes/Surface area calculation failed for globe mask: {e}")
+         return np.nan
+
+    # Calculate Sphericity
+    if surface_area > 1e-6: # Avoid division by zero
+        sphericity = (np.pi**(1/3) * (6 * volume)**(2/3)) / surface_area
+        # Sphericity should be <= 1. Clamp if minor numerical issues occur.
+        sphericity = min(sphericity, 1.0)
+    else:
+        print(f"\tWARNING: Calculated surface area is near zero for globe mask.")
+        sphericity = np.nan
+
+    return sphericity
+
+def lens_aspect_ratio(lens_mask_data, voxel_spacing):
+    """
+    Calculates the aspect ratio of the lens based on the principal axes
+    of the best-fit ellipsoid derived from its inertia tensor.
+    The aspect ratio is defined as sqrt(smallest_eigenvalue) / sqrt(largest_eigenvalue)
+    of the inertia tensor, which is proportional to minor_axis / major_axis.
+    A value closer to 1 indicates a more spherical/circular profile.
+
+    Args:
+        lens_mask_data (np.ndarray): Binary numpy array of the LENS segmentation (uint8).
+        voxel_spacing (tuple or list): Voxel dimensions (e.g., [0.8, 0.8, 0.8]).
+
+    Returns:
+        float: Lens aspect ratio (between 0 and 1), or np.nan if calculation fails.
+    """
+    if not isinstance(lens_mask_data, np.ndarray) or lens_mask_data.ndim != 3:
+        print("\tWARNING (lens_aspect_ratio): lens_mask_data must be a 3D numpy array.")
+        return np.nan
+
+    if lens_mask_data.dtype != np.uint8 and lens_mask_data.dtype != bool:
+        print(f"\tWARNING (lens_aspect_ratio): lens_mask_data dtype is {lens_mask_data.dtype}. Casting to uint8.")
+        lens_mask_data = lens_mask_data.astype(np.uint8)
+
+    # Ensure voxel spacing has 3 dimensions
+    if voxel_spacing is None or len(voxel_spacing) != 3:
+        print(f"\tWARNING (lens_aspect_ratio): Invalid voxel spacing: {voxel_spacing}. Using [1,1,1].")
+        voxel_spacing = (1.0, 1.0, 1.0)
+
+    # Check if the lens mask is empty
+    if np.sum(lens_mask_data) == 0:
+        print(f"\tWARNING (lens_aspect_ratio): Empty lens mask provided.")
+        return np.nan
+
+    try:
+        # regionprops_table expects a label image. If mask is binary, it's label 1.
+        # Pass voxel_spacing to get geometrically correct properties.
+        props = measure.regionprops_table(
+            lens_mask_data, # Should be a label image, binary mask works (label 1)
+            spacing=voxel_spacing,
+            properties=('inertia_tensor_eigvals', 'label') # 'label' to ensure region is found
+        )
+
+        if not props['label']: # Check if any region was found
+            print("\tWARNING (lens_aspect_ratio): No region found by regionprops_table.")
+            return np.nan
+
+        # Eigenvalues of the inertia tensor.
+        # These are proportional to the square of the lengths of the principal axes.
+        eigvals = np.array([
+            props['inertia_tensor_eigvals-0'][0],
+            props['inertia_tensor_eigvals-1'][0],
+            props['inertia_tensor_eigvals-2'][0]
+        ])
+
+        # Filter out near-zero eigenvalues to avoid division by zero or instability
+        eigvals = eigvals[eigvals > 1e-6]
+        if len(eigvals) < 2: # Need at least two axes to form a ratio
+            print("\tWARNING (lens_aspect_ratio): Not enough valid eigenvalues from inertia tensor.")
+            return np.nan
+
+        min_eig_sqrt = np.sqrt(np.min(eigvals))
+        max_eig_sqrt = np.sqrt(np.max(eigvals))
+
+        if max_eig_sqrt == 0: # Avoid division by zero
+            print("\tWARNING (lens_aspect_ratio): Max eigenvalue sqrt is zero.")
+            return np.nan
+
+        aspect_ratio = min_eig_sqrt / max_eig_sqrt
+        # Aspect ratio should be <= 1. Clamp if minor numerical issues occur.
+        aspect_ratio = min(max(aspect_ratio, 0.0), 1.0)
+
+        return aspect_ratio
+
+    except Exception as e:
+        print(f"\tERROR (lens_aspect_ratio): Failed calculating lens aspect ratio: {e}")
+        import traceback
+        traceback.print_exc()
+        return np.nan
 
 def summary_stats(data, pvms, airmask=None, erode=True):
     r"""
@@ -110,53 +242,55 @@ def snr(mu_fg, sigma_fg, n):
     return float(mu_fg / (sigma_fg * sqrt(n / (n - 1))))
 
 
-def cnr(mu_wm, mu_gm, sigma_wm, sigma_gm):
+def cnr(mu_lens, mu_globe, sigma_lens, sigma_globe):
     r"""
-    Calculate the :abbr:`CNR (Contrast-to-Noise Ratio)` [Magnota2006]_.
-    Higher values are better.
+    Calculate the :abbr:`CNR (Contrast-to-Noise Ratio)`.
+    Adapted for eye tissues (LENS vs GLOBE). Higher values are better.
     .. math::
-        \text{CNR} = \frac{|\mu_\text{GM} - \mu_\text{WM} |}{\sqrt{\sigma_B^2 +
-        \sigma_\text{WM}^2 + \sigma_\text{GM}^2}},
-    where :math:`\sigma_B` is the standard deviation of the noise distribution within
-    the air (background) mask.
-    :param float mu_wm: mean of signal within white-matter mask.
-    :param float mu_gm: mean of signal within gray-matter mask.
-    Removed the sigma_bg parameter as it is not useful in the context of fetal brain MRI
-    :param float sigma_wm: standard deviation within white-matter mask.
-    :param float sigma_gm: standard within gray-matter mask.
+        \text{CNR} = \frac{|\mu_\text{LENS} - \mu_\text{GLOBE} |}{\sqrt{\sigma_\text{LENS}^2 + \sigma_\text{GLOBE}^2}}
+
+    :param float mu_lens: mean of signal within LENS mask.
+    :param float mu_globe: mean of signal within GLOBE mask.
+    :param float sigma_lens: standard deviation within LENS mask.
+    :param float sigma_globe: standard within GLOBE mask.
     :return: the computed CNR
     """
-    # Does this make sense to implement this given that sigma_air=0 artificially?
-    return float(abs(mu_wm - mu_gm) / sqrt(sigma_gm**2 + sigma_wm**2))
+    denominator = sqrt(sigma_lens**2 + sigma_globe**2)
+    if denominator == 0:
+        return np.nan
+    return float(abs(mu_lens - mu_globe) / denominator)
 
 
-def cjv(mu_wm, mu_gm, sigma_wm, sigma_gm):
+def cjv(mu_lens, mu_globe, sigma_lens, sigma_globe):
     r"""
     Calculate the :abbr:`CJV (coefficient of joint variation)`, a measure
     related to :abbr:`SNR (Signal-to-Noise Ratio)` and
     :abbr:`CNR (Contrast-to-Noise Ratio)` that is presented as a proxy for
     the :abbr:`INU (intensity non-uniformity)` artifact [Ganzetti2016]_.
-    Lower is better.
+    Adapted for eye tissues (LENS vs GLOBE). Lower is better.
+
     .. math::
-        \text{CJV} = \frac{\sigma_\text{WM} + \sigma_\text{GM}}{|\mu_\text{WM} - \mu_\text{GM}|}.
-    :param float mu_wm: mean of signal within white-matter mask.
-    :param float mu_gm: mean of signal within gray-matter mask.
-    :param float sigma_wm: standard deviation of signal within white-matter mask.
-    :param float sigma_gm: standard deviation of signal within gray-matter mask.
+        \text{CJV} = \frac{\sigma_\text{LENS} + \sigma_\text{GLOBE}}{|\mu_\text{LENS} - \mu_\text{GLOBE}|}.
+
+    :param float mu_lens: mean of signal within LENS mask.
+    :param float mu_globe: mean of signal within GLOBE mask.
+    :param float sigma_lens: standard deviation of signal within LENS mask.
+    :param float sigma_globe: standard deviation of signal within GLOBE mask.
     :return: the computed CJV
     """
-    if mu_wm == mu_gm:
+    denominator = abs(mu_lens - mu_globe)
+    if denominator == 0:
         return np.nan
-    return float((sigma_wm + sigma_gm) / abs(mu_wm - mu_gm))
+    return float((sigma_lens + sigma_globe) / denominator)
 
 
-def wm2max(img, mu_wm):
-    r"""
-    Calculate the :abbr:`WM2MAX (white-matter-to-max ratio)`,
-    defined as the maximum intensity found in the volume w.r.t. the
-    mean value of the white matter tissue.
-    Values close to 1.0 are better:
-    .. math ::
-        \text{WM2MAX} = \frac{\mu_\text{WM}}{P_{99.95}(X)}
-    """
-    return float(mu_wm / np.percentile(img.reshape(-1), 99.95))
+# def wm2max(img, mu_wm):
+#     r"""
+#     Calculate the :abbr:`WM2MAX (white-matter-to-max ratio)`,
+#     defined as the maximum intensity found in the volume w.r.t. the
+#     mean value of the white matter tissue.
+#     Values close to 1.0 are better:
+#     .. math ::
+#         \text{WM2MAX} = \frac{\mu_\text{WM}}{P_{99.95}(X)}
+#     """
+#     return float(mu_wm / np.percentile(img.reshape(-1), 99.95))
