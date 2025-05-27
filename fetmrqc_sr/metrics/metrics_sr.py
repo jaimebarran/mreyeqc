@@ -14,7 +14,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import pdb
+import pdb 
 import numpy as np
 import nibabel as ni
 import skimage
@@ -34,7 +34,8 @@ from .utils import (
     centroid,
     rank_error,
     mask_volume,
-    compute_topological_features
+    compute_topological_features,
+    create_histogram_based_foreground_mask 
 )
 from skimage.filters import sobel, laplace
 from inspect import getmembers, isfunction
@@ -49,12 +50,22 @@ from .mriqc_metrics import (
     cjv,
     # wm2max,
     globe_sphericity,
-    lens_aspect_ratio
+    lens_aspect_ratio,
+    fber,
+    fber_region, 
+    snr_dietrich_val, 
+    tissue_to_max_intensity_ratio, 
+    rpve_custom
 )
 import sys
 from functools import partial
 from fetal_brain_utils import get_cropped_stack_based_on_mask
 import warnings
+import nibabel as nib
+import os   
+
+from skimage.morphology import binary_dilation, binary_erosion, binary_closing, disk, ball 
+from statsmodels import robust
 
 SKIMAGE_FCT = [fct for _, fct in getmembers(skimage.filters, isfunction)]
 
@@ -65,20 +76,6 @@ SEGM = {
     "FAT":              3,
     "MUSCLE":           4,
 }
-
-# SEGM = {
-#     "LENS":             2,
-#     "GLOBE":            0,
-#     "OPTIQUE_NERVE":    4,
-#     "FAT":              3,
-#     "MUSCLE":           1,
-# }
-
-#SEGM = {"CSF": 1, "GM": 2, "WM": 3, "BS": 4, "CBM": 5}
-# Re-mapping to do for FeTA labels: ventricles as CSF, dGM as GM.
-
-FETA_LABELS = [None, 1, 2, 3, 1, None, 2, None, None]
-
 segm_names = list(SEGM.keys())
 
 EYE_MAP_SEG = [
@@ -87,35 +84,13 @@ EYE_MAP_SEG = [
     1,    # Index 2: Raw Label 2 (GLOBE)      -> Target 1 (GLOBE)
     2,    # Index 3: Raw Label 3 (NERVE)      -> Target 2 (OPTIQUE_NERVE)
     3,    # Index 4: Raw Label 4 (FAT)        -> Target 3 (FAT)
-    3,    # Index 5: Raw Label 5 (FAT)        -> Target 3 (FAT) <-- Group FAT
+    3,    # Index 5: Raw Label 5 (FAT)        -> Target 3 (FAT)
     4,    # Index 6: Raw Label 6 (MUSCLE)     -> Target 4 (MUSCLE)
-    4,    # Index 7: Raw Label 7 (MUSCLE)     -> Target 4 (MUSCLE) <-- Group MUSCLE
-    4,    # Index 8: Raw Label 8 (MUSCLE)     -> Target 4 (MUSCLE) <-- Group MUSCLE
-    4,    # Index 9: Raw Label 9 (MUSCLE)     -> Target 4 (MUSCLE) <-- Group MUSCLE
+    4,    # Index 7: Raw Label 7 (MUSCLE)     -> Target 4 (MUSCLE)
+    4,    # Index 8: Raw Label 8 (MUSCLE)     -> Target 4 (MUSCLE)
+    4,    # Index 9: Raw Label 9 (MUSCLE)     -> Target 4 (MUSCLE)
 ]
 
-BOUNTI_LABELS = [
-    None,
-    1,
-    1,
-    2,
-    2,
-    3,
-    3,
-    1,
-    1,
-    1,
-    4,
-    5,
-    5,
-    5,
-    2,
-    2,
-    2,
-    2,
-    1,
-    1,
-]
 
 class SRMetrics:
     """Contains a battery of metrics that can be evaluated on individual
@@ -140,124 +115,6 @@ class SRMetrics:
         self.verbose = verbose
         self.robust_prepro = robust_preprocessing
         self.correct_bias = correct_bias
-        '''        self.metrics_func = {
-            "centroid": partial(centroid),
-            "rank_error": partial(
-                rank_error,
-                threshold=0.99,
-                relative_rank=False,
-            ),
-            "rank_error_relative": partial(
-                rank_error,
-                threshold=0.99,
-                relative_rank=True,
-            ),
-            "mask_volume": mask_volume,
-            "ncc_window": self.process_metric(
-                metric=normalized_cross_correlation, **default_params
-            ),
-            "ncc_median": self.process_metric(
-                metric=normalized_cross_correlation,
-                mask_intersection=True,
-                reduction="median",
-            ),
-            "joint_entropy_window": self.process_metric(
-                metric=joint_entropy, **default_params
-            ),
-            "joint_entropy_median": self.process_metric(
-                metric=joint_entropy,
-                compute_on_mask=True,
-                mask_intersection=True,
-                reduction="median",
-            ),
-            "mi_window": self.process_metric(
-                metric=mutual_information, **default_params
-            ),
-            "mi_median": self.process_metric(
-                metric=mutual_information,
-                compute_on_mask=True,
-                mask_intersection=True,
-                reduction="median",
-            ),
-            "nmi_window": self.process_metric(
-                metric=normalized_mutual_information, **default_params
-            ),
-            "nmi_median": self.process_metric(
-                metric=normalized_mutual_information,
-                compute_on_mask=True,
-                mask_intersection=True,
-                reduction="median",
-            ),
-            "shannon_entropy": self.process_metric(
-                shannon_entropy,
-                type="noref",
-                compute_on_mask=True,
-            ),
-            "psnr_window": self.process_metric(
-                psnr,
-                use_datarange=True,
-                **default_params,
-            ),
-            "nrmse_window": self.process_metric(nrmse, **default_params),
-            "rmse_window": self.process_metric(rmse, **default_params),
-            "nmae_window": self.process_metric(nmae, **default_params),
-            "mae_window": self.process_metric(mae, **default_params),
-            "ssim_window": partial(self._ssim, **default_params),
-            "mean": self.process_metric(
-                np.mean,
-                type="noref",
-                compute_on_mask=True,
-            ),
-            "std": self.process_metric(
-                np.std,
-                type="noref",
-                compute_on_mask=True,
-            ),
-            "median": self.process_metric(
-                np.median,
-                type="noref",
-                compute_on_mask=True,
-            ),
-            "percentile_5": self.process_metric(
-                partial(np.percentile, q=5),
-                type="noref",
-                compute_on_mask=True,
-            ),
-            "percentile_95": self.process_metric(
-                partial(np.percentile, q=95),
-                type="noref",
-                compute_on_mask=True,
-            ),
-            "kurtosis": self.process_metric(
-                kurtosis,
-                type="noref",
-                compute_on_mask=True,
-            ),
-            "variation": self.process_metric(
-                variation,
-                type="noref",
-                compute_on_mask=True,
-            ),
-            ## Filter-based metrics
-            "filter_laplace": partial(self._metric_filter, filter=laplace),
-            "filter_sobel": partial(self._metric_filter, filter=sobel),
-            "seg_sstats": self.process_metric(self._seg_sstats, type="seg"),
-            "seg_volume": self.process_metric(self._seg_volume, type="seg"),
-            "seg_snr": self.process_metric(self._seg_snr, type="seg"),
-            "seg_cnr": self.process_metric(self._seg_cnr, type="seg"),
-            "seg_cjv": self.process_metric(self._seg_cjv, type="seg"),
-            #"seg_wm2max": self.process_metric(self._seg_wm2max, type="seg"),
-            "seg_topology": self.process_metric(self._seg_topology, type="seg"),
-
-
-
-            # For eye
-            "centroid": partial(centroid, central_third=True),
-            "centroid_full": partial(centroid, central_third=False),
-            "seg_globe_sphericity": self.process_metric(self._seg_globe_sphericity, type="seg"),
-
-            "im_size_vx_size": self._get_voxel_size,
-        }'''
         self.metrics_func = {
             # --- Centroid Metrics (Corrected - Use imported function) ---
             "centroid": partial(centroid, central_third=True),
@@ -367,6 +224,25 @@ class SRMetrics:
                 compute_on_mask=True,
             ),
 
+            # FBER
+            "fber_lens": self._fber_lens,
+            "fber_globe": self._fber_globe,
+
+
+            # WM2MAX (Tissue2Max)
+            "lens_to_max_intensity": self._lens_to_max_intensity,
+            "globe_to_max_intensity": self._globe_to_max_intensity,
+
+            # RPVE
+            "rpve_lens_boundary": self._rpve_lens_boundary,
+            "rpve_globe_boundary": self._rpve_globe_boundary, # General globe boundary
+            "rpve_globe_lens_interface": self._rpve_globe_lens_interface, # Globe at lens interface
+
+            # SNR Dietrich
+            "snr_dietrich_lens": self._snr_dietrich_lens,
+            "snr_dietrich_globe": self._snr_dietrich_globe,
+            
+
             # --- Filter-Based Metrics ---
             "filter_laplace": partial(self._metric_filter, filter=laplace),
             "filter_sobel": partial(self._metric_filter, filter=sobel),
@@ -413,6 +289,236 @@ class SRMetrics:
         value_to_return = 0.0 if isnan else sphericity
         return value_to_return, isnan'''
     
+    # --- RPVE Wrapper Methods (require careful mask definition) ---
+    def _create_pve_masks(self, tissue_mask_np: np.ndarray, structure_element_radius: int = 1):
+        """Helper to create pure tissue and PVE interface masks."""
+        if not np.any(tissue_mask_np):
+            return None, None
+        
+        # Ensure binary
+        tissue_mask_bin = (tissue_mask_np > 0)
+        
+        # Define structuring element (e.g., a ball for 3D)
+        # Radius 1 means a 3x3x3 structuring element.
+        selem = ball(structure_element_radius) 
+        
+        eroded_mask = binary_erosion(tissue_mask_bin, footprint=selem)
+        dilated_mask = binary_dilation(tissue_mask_bin, footprint=selem)
+        
+        # Pure tissue mask: eroded version (away from boundaries)
+        pure_mask = eroded_mask
+        
+        # PVE interface mask: region between dilated and eroded (the boundary itself)
+        # Or, tissue_mask_bin XOR eroded_mask (inner boundary)
+        # Or, dilated_mask XOR tissue_mask_bin (outer boundary)
+        # Let's use (dilated XOR eroded) to get a thicker boundary region.
+        # Or more simply, tissue_mask_bin - eroded_mask (inner boundary voxels)
+        pve_interface_mask = tissue_mask_bin & (~eroded_mask) # Inner boundary
+        
+        # Ensure they don't overlap significantly if used for ratio
+        # The current PVE is part of original tissue mask. Pure is subset of original.
+        if not np.any(pure_mask) or not np.any(pve_interface_mask):
+            return None, None # Not enough structure to define both
+            
+        return pure_mask, pve_interface_mask
+    
+    # --- FBER Wrapper Methods ---
+    def _fber_lens(self, image, seg_dict, **kwargs):
+        lens_mask = seg_dict.get("LENS")
+        globe_mask = seg_dict.get("GLOBE")
+        
+        if lens_mask is None or globe_mask is None:
+            return np.nan, True
+        if not np.any(lens_mask): # Ensure lens mask is not empty
+            return np.nan, True
+
+        # Background: Globe tissue excluding the lens
+        # Ensure masks are binary 0/1 for boolean operations
+        lens_mask_bin = (lens_mask > 0)
+        globe_mask_bin = (globe_mask > 0)
+        background_mask = globe_mask_bin & (~lens_mask_bin)
+        
+        if not np.any(background_mask): # If globe is entirely lens or bg mask is empty
+            # Fallback: if FAT is available and substantial, use it as background
+            fat_mask = seg_dict.get("FAT")
+            if fat_mask is not None and np.sum(fat_mask > 0) > 100: # Min 100 voxels
+                 background_mask = (fat_mask > 0)
+            else: # Still no good background
+                return np.nan, True 
+                
+        val = fber_region(image, lens_mask_bin, background_mask)
+        return val, np.isnan(val) or val == -1.0 or val == -2.0 # MRIQC FBER can return -1 for empty bg
+
+    def _fber_globe(self, image, seg_dict, **kwargs):
+        globe_mask = seg_dict.get("GLOBE")
+        # `maskc` is the overall eye ROI mask from evaluate_metrics context
+        # It is passed as `mask` in `args_dict` to eval_metrics_and_update_results
+        # which then calls the metric func with `**args_dict` (so `mask` is available in kwargs)
+        overall_eye_mask = kwargs.get("mask") 
+
+        if globe_mask is None or overall_eye_mask is None:
+            return np.nan, True
+        if not np.any(globe_mask):
+            return np.nan, True
+
+        # Background: Within overall eye mask, but outside the globe
+        globe_mask_bin = (globe_mask > 0)
+        overall_eye_mask_bin = (overall_eye_mask > 0)
+        background_mask = overall_eye_mask_bin & (~globe_mask_bin)
+
+        # Alternative background: Orbital fat if available and preferred
+        # fat_mask = seg_dict.get("FAT")
+        # if fat_mask is not None and np.any(fat_mask > 0):
+        #    background_mask = (fat_mask > 0) & (~globe_mask_bin) # Fat not overlapping globe
+
+        if not np.any(background_mask):
+            return np.nan, True
+            
+        val = fber_region(image, globe_mask_bin, background_mask)
+        return val, np.isnan(val) or val == -1.0 or val == -2.0
+
+  # --- SNR Dietrich Wrapper Methods ---
+    def _snr_dietrich_lens(self, image, seg_dict, **kwargs):
+        lens_mask = seg_dict.get("LENS")
+        if lens_mask is None or not np.any(lens_mask): return np.nan, True
+
+        # Define background_noise_mask:
+        # Option 1: Use FAT if available and reasonably sized
+        noise_mask = seg_dict.get("FAT")
+        # Option 2: Region outside the globe but within overall eye mask (if FAT is not good)
+        if noise_mask is None or np.sum(noise_mask > 0) < 100: # Threshold for min size
+            overall_eye_mask = kwargs.get("mask")
+            globe_mask = seg_dict.get("GLOBE")
+            if overall_eye_mask is not None and globe_mask is not None:
+                noise_mask = (overall_eye_mask > 0) & (globe_mask == 0) & (lens_mask == 0) # Outside globe and lens
+            else:
+                return np.nan, True # Cannot define noise mask
+
+        if noise_mask is None or not np.any(noise_mask > 0): return np.nan, True
+        
+        lens_mask_bin = (lens_mask > 0)
+        noise_mask_bin = (noise_mask > 0)
+
+        mu_fg = np.mean(image[lens_mask_bin])
+        noise_pixels = image[noise_mask_bin]
+        if noise_pixels.size < 2: return np.nan, True # Need at least 2 pixels for std/mad
+
+        sigma_noise = np.std(noise_pixels)
+        mad_noise = robust.mad(noise_pixels, center=np.median) # statsmodels.robust.mad
+
+        val = snr_dietrich_val(mu_fg, sigma_noise, mad_noise)
+        return val, np.isnan(val) or val == -1.0
+
+    def _snr_dietrich_globe(self, image, seg_dict, **kwargs):
+        globe_mask = seg_dict.get("GLOBE")
+        if globe_mask is None or not np.any(globe_mask): return np.nan, True
+
+        # Define background_noise_mask:
+        # Option 1: Use FAT if available and reasonably sized, and not overlapping globe
+        noise_mask = seg_dict.get("FAT")
+        globe_mask_bin = (globe_mask > 0) # For ensuring no overlap with FAT
+        if noise_mask is not None and np.sum(noise_mask > 0) > 100:
+            noise_mask = (noise_mask > 0) & (~globe_mask_bin)
+        else: # Fallback
+            overall_eye_mask = kwargs.get("mask")
+            if overall_eye_mask is not None:
+                noise_mask = (overall_eye_mask > 0) & (~globe_mask_bin) # Outside globe
+            else:
+                return np.nan, True
+        
+        if noise_mask is None or not np.any(noise_mask > 0): return np.nan, True
+
+        noise_mask_bin = (noise_mask > 0)
+
+        mu_fg = np.mean(image[globe_mask_bin])
+        noise_pixels = image[noise_mask_bin]
+        if noise_pixels.size < 2: return np.nan, True
+
+        sigma_noise = np.std(noise_pixels)
+        mad_noise = robust.mad(noise_pixels, center=np.median)
+
+        val = snr_dietrich_val(mu_fg, sigma_noise, mad_noise)
+        return val, np.isnan(val) or val == -1.0
+    
+     # --- Tissue2Max Wrapper Methods ---
+    def _lens_to_max_intensity(self, image, seg_dict, **kwargs):
+        lens_mask = seg_dict.get("LENS")
+        if lens_mask is None: return np.nan, True
+        # `image` is imagec
+        val = tissue_to_max_intensity_ratio(image, (lens_mask > 0))
+        return val, np.isnan(val) or val == -1.0
+
+    def _globe_to_max_intensity(self, image, seg_dict, **kwargs):
+        globe_mask = seg_dict.get("GLOBE")
+        if globe_mask is None: return np.nan, True
+        val = tissue_to_max_intensity_ratio(image, (globe_mask > 0))
+        return val, np.isnan(val) or val == -1.0
+    
+
+    def _rpve_lens_boundary(self, image, seg_dict, **kwargs):
+        lens_mask = seg_dict.get("LENS")
+        if lens_mask is None: return np.nan, True
+        
+        pure_lens_mask, pve_lens_boundary_mask = self._create_pve_masks(lens_mask)
+        if pure_lens_mask is None or pve_lens_boundary_mask is None:
+            return np.nan, True
+            
+        val = rpve_custom(image, pure_lens_mask, pve_lens_boundary_mask)
+        return val, np.isnan(val) or val == -1.0
+
+    def _rpve_globe_boundary(self, image, seg_dict, **kwargs):
+        # This would be the outer boundary of the globe with external tissues
+        globe_mask = seg_dict.get("GLOBE")
+        if globe_mask is None: return np.nan, True
+
+        pure_globe_mask, pve_globe_boundary_mask = self._create_pve_masks(globe_mask)
+        if pure_globe_mask is None or pve_globe_boundary_mask is None:
+            return np.nan, True
+            
+        val = rpve_custom(image, pure_globe_mask, pve_globe_boundary_mask)
+        return val, np.isnan(val) or val == -1.0
+
+    def _rpve_globe_lens_interface(self, image, seg_dict, **kwargs):
+        # PVE between globe (vitreous/aqueous humor) and lens
+        lens_mask = seg_dict.get("LENS")
+        globe_mask = seg_dict.get("GLOBE")
+        if lens_mask is None or globe_mask is None: return np.nan, True
+
+        lens_mask_bin = (lens_mask > 0)
+        globe_mask_bin = (globe_mask > 0)
+
+        # Pure globe tissue (non-lens part of globe, eroded to be away from lens boundary)
+        # This definition assumes globe_mask includes the lens area initially if we subtract lens.
+        # If globe_mask is "sclera/choroid/retina + vitreous" and lens_mask is separate,
+        # then "pure" globe could be (globe_mask_bin & ~lens_mask_bin), then eroded.
+        
+        # Let's assume "pure globe" is part of the globe not overlapping heavily with lens, and eroded.
+        # Consider globe_interior = globe_mask_bin & (~lens_mask_bin)
+        # pure_globe_sample_mask, _ = self._create_pve_masks(globe_interior, structure_element_radius=2) # More eroded
+        
+        # A simpler PVE: interface is dilated lens boundary intersecting with non-lens globe.
+        # PVE interface: (dilate(lens) AND globe) AND NOT lens
+        # Pure tissue: globe far from lens, or lens far from globe boundary
+        
+        # Let's define:
+        # Pure globe region: globe_mask that is not lens_mask, eroded.
+        pure_globe_region = binary_erosion(globe_mask_bin & (~lens_mask_bin), footprint=ball(1))
+        
+        # PVE interface: voxels that are in dilated lens AND in globe, but NOT in original lens
+        # This captures the globe tissue immediately adjacent to the lens.
+        dilated_lens = binary_dilation(lens_mask_bin, footprint=ball(1))
+        pve_interface_mask = dilated_lens & globe_mask_bin & (~lens_mask_bin)
+
+        if not np.any(pure_globe_region) or not np.any(pve_interface_mask):
+            return np.nan, True
+            
+        # Here, "pure_tissue" is pure_globe_region, "pve_interface" is globe_at_lens_boundary
+        # We expect pure_globe_region to have a certain intensity, and pve_interface might be different.
+        val = rpve_custom(image, pure_globe_region, pve_interface_mask)
+        return val, np.isnan(val) or val == -1.0
+
+
+
     def _seg_lens_aspect_ratio(self, seg_dict, vx_size, **kwargs):
         """
         Wrapper to calculate lens aspect ratio using pre-loaded segmentation data.
@@ -465,60 +571,192 @@ class SRMetrics:
         # Return the calculated value (or NaN) and the isnan flag
         return aspect_ratio, isnan
 
+    # def _seg_globe_sphericity(self, seg_dict, vx_size, **kwargs):
+    #     """
+    #     Wrapper to calculate globe sphericity using pre-loaded segmentation data.
+    #     """
+    #     isnan = False
+    #     print(f"--- Debugging Sphericity ---")
+
+    #     # --- More detailed check ---
+    #     print(f"\tChecking seg_dict type: {type(seg_dict)}")
+    #     if isinstance(seg_dict, dict):
+    #          print(f"\tseg_dict keys: {list(seg_dict.keys())}")
+    #          globe_mask = seg_dict.get("GLOBE") # Use .get() for safer access
+    #          print(f"\tType of seg_dict['GLOBE']: {type(globe_mask)}")
+    #     else:
+    #          print(f"\tERROR: seg_dict is not a dictionary!")
+    #          globe_mask = None
+
+    #     # Check if the mask exists AND is a numpy array AND has non-zero sum
+    #     if not isinstance(globe_mask, np.ndarray) or np.sum(globe_mask) == 0:
+    #         print(f"\tWARNING: GLOBE mask is not a valid ndarray or is empty. Sum={np.sum(globe_mask) if isinstance(globe_mask, np.ndarray) else 'N/A'}")
+    #         return 0.0, True # Return 0 and mark as NaN
+    #     # --- End Detailed Check ---
+
+    #     # If we get here, globe_mask is a non-empty numpy array
+    #     print(f"\tInput GLOBE mask: Sum={np.sum(globe_mask)}, Shape={globe_mask.shape}, Dtype={globe_mask.dtype}")
+    #     print(f"\tInput vx_size: {vx_size}")
+
+    #     # Explicitly cast to uint8
+    #     if globe_mask.dtype != np.uint8:
+    #          print(f"\tCasting GLOBE mask from {globe_mask.dtype} to uint8.")
+    #          globe_mask = globe_mask.astype(np.uint8)
+    #          # Re-check sum after casting in case of issues
+    #          if np.sum(globe_mask) == 0:
+    #               print(f"\tWARNING: GLOBE mask became empty after casting to uint8.")
+    #               return 0.0, True
+
+    #     try:
+    #         # Call the actual calculation function
+    #         sphericity = globe_sphericity(globe_mask, vx_size)
+    #         print(f"\tCalculated Sphericity: {sphericity}")
+
+    #         if np.isnan(sphericity):
+    #             isnan = True
+    #             sphericity = 0.0
+    #     except Exception as e:
+    #         print(f"\tERROR: Failed calculating sphericity via wrapper: {e}")
+    #         import traceback
+    #         traceback.print_exc()
+    #         sphericity = 0.0
+    #         isnan = True
+
+    #     print(f"--- End Sphericity Debug ---")
+    #     value_to_return = 0.0 if isnan else sphericity
+    #     return value_to_return, isnan
+    
     def _seg_globe_sphericity(self, seg_dict, vx_size, **kwargs):
         """
-        Wrapper to calculate globe sphericity using pre-loaded segmentation data.
+        Wrapper to calculate globe sphericity using pre-loaded segmentation data,
+        with enhanced debugging for float64 to uint8 conversion and mask inspection.
         """
         isnan = False
-        print(f"--- Debugging Sphericity ---")
+        sphericity_value_to_return = 0.0  # Default to 0.0 in case of early exit/error
 
-        # --- More detailed check ---
+        print(f"--- Debugging Sphericity (Subject/Counter: {self.counter}) ---")
+
+        # --- More detailed check for seg_dict and GLOBE key ---
         print(f"\tChecking seg_dict type: {type(seg_dict)}")
-        if isinstance(seg_dict, dict):
-             print(f"\tseg_dict keys: {list(seg_dict.keys())}")
-             globe_mask = seg_dict.get("GLOBE") # Use .get() for safer access
-             print(f"\tType of seg_dict['GLOBE']: {type(globe_mask)}")
-        else:
-             print(f"\tERROR: seg_dict is not a dictionary!")
-             globe_mask = None
-
-        # Check if the mask exists AND is a numpy array AND has non-zero sum
-        if not isinstance(globe_mask, np.ndarray) or np.sum(globe_mask) == 0:
-            print(f"\tWARNING: GLOBE mask is not a valid ndarray or is empty. Sum={np.sum(globe_mask) if isinstance(globe_mask, np.ndarray) else 'N/A'}")
+        if not isinstance(seg_dict, dict):
+            print(f"\tERROR: seg_dict is not a dictionary!")
             return 0.0, True # Return 0 and mark as NaN
+
+        print(f"\tseg_dict keys: {list(seg_dict.keys())}")
+        globe_mask = seg_dict.get("GLOBE") # Use .get() for safer access
+
+        if globe_mask is None:
+            print(f"\tERROR: 'GLOBE' key not found in seg_dict.")
+            return 0.0, True
+        
+        print(f"\tType of seg_dict['GLOBE']: {type(globe_mask)}")
+
+        if not isinstance(globe_mask, np.ndarray):
+            print(f"\tERROR: GLOBE mask is not a numpy array.")
+            return 0.0, True
         # --- End Detailed Check ---
 
-        # If we get here, globe_mask is a non-empty numpy array
-        print(f"\tInput GLOBE mask: Sum={np.sum(globe_mask)}, Shape={globe_mask.shape}, Dtype={globe_mask.dtype}")
+        print(f"\tInput GLOBE mask (pre-cast): Sum={np.sum(globe_mask)}, Shape={globe_mask.shape}, Dtype={globe_mask.dtype}")
         print(f"\tInput vx_size: {vx_size}")
 
+        # ---- DETAILED CHECKS for the float64 mask ----
+        if globe_mask.dtype == np.float64:
+            print(f"\t\tDEBUG: GLOBE mask (float64) min value: {np.min(globe_mask)}")
+            print(f"\t\tDEBUG: GLOBE mask (float64) max value: {np.max(globe_mask)}")
+            unique_vals_float = np.unique(globe_mask)
+            print(f"\t\tDEBUG: GLOBE mask (float64) unique values (first 20): {unique_vals_float[:20]}")
+            if len(unique_vals_float) > 20:
+                print(f"\t\tDEBUG: GLOBE mask (float64) ... and {len(unique_vals_float) - 20} more unique values.")
+
+            # Check for values not close to 0.0 or 1.0 (assuming it should be binary-like)
+            non_binary_like_values = globe_mask[
+                (np.abs(globe_mask - 0.0) > 1e-6) & (np.abs(globe_mask - 1.0) > 1e-6)
+            ]
+            print(f"\t\tDEBUG: Count of float64 values not close to 0.0 or 1.0: {len(non_binary_like_values)}")
+            if len(non_binary_like_values) > 0:
+                print(f"\t\tDEBUG: Example non-binary-like values (first 5): {non_binary_like_values[:5]}")
+        # ---- END OF DETAILED FLOAT64 CHECKS ----
+
         # Explicitly cast to uint8
+        globe_mask_uint8 = None # Initialize
         if globe_mask.dtype != np.uint8:
-             print(f"\tCasting GLOBE mask from {globe_mask.dtype} to uint8.")
-             globe_mask = globe_mask.astype(np.uint8)
-             # Re-check sum after casting in case of issues
-             if np.sum(globe_mask) == 0:
-                  print(f"\tWARNING: GLOBE mask became empty after casting to uint8.")
-                  return 0.0, True
+            print(f"\tCasting GLOBE mask from {globe_mask.dtype} to uint8.")
+            globe_mask_uint8 = globe_mask.astype(np.uint8)
+            print(f"\t\tDEBUG: GLOBE mask (uint8) Sum AFTER cast: {np.sum(globe_mask_uint8)}")
+            if np.sum(globe_mask) > 0 and np.sum(globe_mask_uint8) == 0 and len(non_binary_like_values) < np.sum(globe_mask): # Added more specific condition
+                 print(f"\t\tWARNING: GLOBE mask Sum became zero after casting to uint8 (original sum was {np.sum(globe_mask)}). This might be due to float values < 1.0.")
+        else:
+            globe_mask_uint8 = globe_mask # Already uint8
+            print(f"\tGLOBE mask is already uint8. Sum: {np.sum(globe_mask_uint8)}")
+
+
+        # Check if the uint8 mask is empty
+        if np.sum(globe_mask_uint8) == 0:
+            print(f"\tWARNING: GLOBE mask (uint8) is empty or became empty after casting. Original float sum was {np.sum(globe_mask)}.")
+            # Try to save the original float mask if it led to an empty uint8 mask
+            if np.sum(globe_mask) > 0 : # Original float mask was not empty
+                try:
+                    # Construct a unique filename. self.counter is from SRMetrics instance.
+                    # Or, if sr_path is passed in kwargs from evaluate_metrics:
+                    # subject_id_for_file = os.path.basename(kwargs.get('sr_path', f'unknown_subject_counter_{self.counter}')).split('.')[0]
+                    subject_id_for_file = f"counter_{self.counter}"
+                    debug_dir = "./debug_masks"
+                    os.makedirs(debug_dir, exist_ok=True)
+                    mask_filename_float = os.path.join(debug_dir, f"globe_mask_original_float_sub_{subject_id_for_file}.nii.gz")
+                    affine_placeholder = np.diag(list(vx_size) + [1])
+                    nib.save(nib.Nifti1Image(globe_mask.astype(np.float32), affine_placeholder), mask_filename_float) # Save as float32
+                    print(f"\t\tSAVED original problematic float64 GLOBE mask (as float32) to {mask_filename_float}")
+                except Exception as e_save_float:
+                    print(f"\t\tERROR saving original problematic float64 GLOBE mask: {e_save_float}")
+            return 0.0, True # Sphericity is undefined for an empty mask
+
+        # ---- SAVE THE UINT8 MASK (THE ONE USED FOR CALCULATION) ----
+        try:
+            subject_id_for_file = f"counter_{self.counter}"
+            # You might want to make the debug directory configurable or ensure it exists
+            debug_dir = "./debug_masks"
+            os.makedirs(debug_dir, exist_ok=True) # Create directory if it doesn't exist
+            mask_filename_uint8 = os.path.join(debug_dir, f"globe_mask_uint8_for_sphericity_sub_{subject_id_for_file}.nii.gz")
+            
+            # For saving, you need an affine. Using a placeholder based on vx_size.
+            # Ideally, you'd use the affine from the corresponding resampled NIfTI image
+            # before it was converted to a numpy array by squeeze_flip_tr.
+            # This placeholder affine assumes standard orientation.
+            affine_placeholder = np.diag(list(vx_size) + [1])
+            
+            nib.save(nib.Nifti1Image(globe_mask_uint8, affine_placeholder), mask_filename_uint8)
+            print(f"\tSUCCESS: Saved uint8 GLOBE mask (input to sphericity calc) to {mask_filename_uint8}")
+        except Exception as e_save_uint8:
+            print(f"\tERROR saving uint8 GLOBE mask for debugging: {e_save_uint8}")
+        # ---- END OF SAVING UINT8 MASK ----
 
         try:
-            # Call the actual calculation function
-            sphericity = globe_sphericity(globe_mask, vx_size)
-            print(f"\tCalculated Sphericity: {sphericity}")
+            # Call the actual calculation function with the uint8 mask
+            calculated_sphericity = globe_sphericity(globe_mask_uint8, vx_size)
+            print(f"\tCalculated Sphericity by globe_sphericity(): {calculated_sphericity}")
 
-            if np.isnan(sphericity):
+            if np.isnan(calculated_sphericity):
                 isnan = True
-                sphericity = 0.0
+                sphericity_value_to_return = 0.0 # Default for NaN from calculation
+            else:
+                sphericity_value_to_return = calculated_sphericity
+                # Ensure isnan is False if sphericity is a valid number (even 1.0 or 0.0)
+                isnan = False 
+
         except Exception as e:
             print(f"\tERROR: Failed calculating sphericity via wrapper: {e}")
             import traceback
             traceback.print_exc()
-            sphericity = 0.0
+            sphericity_value_to_return = 0.0 # Default on error
             isnan = True
 
-        print(f"--- End Sphericity Debug ---")
-        value_to_return = 0.0 if isnan else sphericity
-        return value_to_return, isnan
+        print(f"--- End Sphericity Debug (Subject/Counter: {self.counter}) ---")
+        
+        # The original code had a slightly different logic for return if isnan was true
+        # Let's ensure it's 0.0 if isnan is True, otherwise the calculated value.
+        final_sphericity = 0.0 if isnan else sphericity_value_to_return
+        return final_sphericity, isnan
+
     def _get_voxel_size(self, vx_size, **kwargs):
         """
         Returns the voxel size passed during metric evaluation.
@@ -656,6 +894,55 @@ class SRMetrics:
         imagec, maskc, seg_dict = self._load_and_prep_nifti(
             sr_path, mask_path, seg_path, resample_to
         )
+
+        # ---- Generate histogram-based foreground mask ----
+        generated_foreground_mask = None
+        if imagec is not None and np.any(imagec): # Ensure imagec is not None and has content
+            try:
+                generated_foreground_mask = create_histogram_based_foreground_mask(
+                    imagec,
+                    otsu_scale_factor=0.9, # Adjust as needed
+                    closing_iters=2,       # Ensure this matches your utils.py definition
+                    opening_iters=1,       # Ensure this matches your utils.py definition
+                    min_object_size_frac=0.95,
+                    min_hole_size_frac=0.05
+                )
+                if self.verbose:
+                    print(f"\tGenerated histogram-based foreground mask: Sum={np.sum(generated_foreground_mask)}")
+                    # ---- CORRECTED SAVING LOGIC ----
+                    try:
+                        import nibabel as nib # Ensure nibabel is imported at the top of metrics_sr.py
+                        import os # Ensure os is imported if using os.path.join
+
+                        # vx_size is known here from resample_to
+                        vx_size_for_save = [resample_to] * 3
+                        temp_affine = np.diag(list(vx_size_for_save) + [1])
+                        
+                        # Make self.counter available or use part of sr_path for unique name
+                        # Assuming self.counter is set during SRMetrics initialization
+                        debug_mask_filename = f"debug_histogram_fg_mask_counter_{self.counter}.nii.gz"
+                        
+                        # Optional: Save to a specific debug directory
+                        # output_debug_dir = "./debug_masks"
+                        # os.makedirs(output_debug_dir, exist_ok=True)
+                        # debug_mask_filename = os.path.join(output_debug_dir, f"histogram_fg_mask_counter_{self.counter}.nii.gz")
+
+                        nib.save(nib.Nifti1Image(generated_foreground_mask.astype(np.uint8), temp_affine), debug_mask_filename)
+                        print(f"\tDEBUG: Saved histogram-based foreground mask to {debug_mask_filename}")
+                    except Exception as e_save_debug:
+                        print(f"\tDEBUG: Error saving histogram-based foreground mask: {e_save_debug}")
+                    # ---- END OF CORRECTED SAVING LOGIC ----
+
+            except Exception as e_fg_mask:
+                import traceback # Good for more detailed error during debugging
+                print(f"Warning: Could not generate histogram-based foreground mask: {e_fg_mask}")
+                print(traceback.format_exc()) # Print full traceback for the warning
+                # Fallback logic
+                if maskc is not None:
+                     generated_foreground_mask = (maskc > 0).astype(np.uint8)
+        elif maskc is not None: # If imagec was None or empty
+            generated_foreground_mask = (maskc > 0).astype(np.uint8)
+        # ----------------------------------------------------
 
         args_dict = {
             "image": imagec,

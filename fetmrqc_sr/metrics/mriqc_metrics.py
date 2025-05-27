@@ -26,8 +26,148 @@ from scipy.stats import kurtosis  # pylint: disable=E0611
 import numpy as np
 from math import sqrt
 from skimage import measure 
+from statsmodels import robust
+from scipy.stats import chi2, norm 
 
+# MRIQC's Dietrich factor for SNR
+DIETRICH_FACTOR = np.sqrt(2 / (4.0 - np.pi))
 
+# --- New/Adapted FBER ---
+def fber_region(img: np.ndarray, region_mask: np.ndarray, background_mask: np.ndarray, decimals: int = 4) -> float:
+    """
+    Calculates the Foreground-Background Energy Ratio for a specific region.
+    FBER = median_energy(foreground) / median_energy(background)
+    """
+    if not np.any(region_mask):
+        print("WARNING (fber_region): region_mask is empty.")
+        return -2.0 # Indicate specific error for empty foreground
+    if not np.any(background_mask):
+        print("WARNING (fber_region): background_mask is empty.")
+        return -1.0 # Consistent with MRIQC for empty background
+
+    fg_img_values = img[region_mask > 0]
+    bg_img_values = img[background_mask > 0]
+
+    if fg_img_values.size == 0:
+        print("WARNING (fber_region): No voxels in region_mask after indexing img.")
+        return -2.0
+    if bg_img_values.size == 0:
+        print("WARNING (fber_region): No voxels in background_mask after indexing img.")
+        return -1.0
+
+    # Use median of squared absolute values for energy
+    fg_mu = np.median(np.abs(fg_img_values)**2)
+    bg_mu = np.median(np.abs(bg_img_values)**2)
+
+    if bg_mu < 1.0e-6: # Avoid division by zero or extremely small background energy
+        return -1.0 # Or a very large number if fg_mu is substantial, depending on desired behavior
+    return round(float(fg_mu / bg_mu), decimals)
+
+# --- New/Adapted SNR Dietrich ---
+def snr_dietrich_val(mu_fg: float, sigma_noise: float, mad_noise: float = -1.0) -> float:
+    """
+    Calculates Dietrich SNR using pre-calculated foreground mean and noise std/mad.
+    Uses MAD if valid (>=0), otherwise sigma_noise.
+    """
+    if mad_noise >= 0.0: # Prefer MAD if available and valid
+        if mad_noise < 1.0e-6: # Check if MAD is too small
+            # Fallback to sigma_noise if MAD is extremely small but sigma_noise might be more robust
+            if sigma_noise < 1.0e-6:
+                print("WARNING (snr_dietrich_val): Both MAD and Sigma of noise are too small.")
+                return -1.0 # Or np.nan
+            print("WARNING (snr_dietrich_val): MAD of noise is very small, using Sigma.")
+            noise_std_eff = sigma_noise
+        else:
+            noise_std_eff = mad_noise # Dietrich original uses MAD for robustness
+    else: # Fallback to sigma_noise if MAD is not provided or invalid
+        if sigma_noise < 1.0e-6:
+            print("WARNING (snr_dietrich_val): Sigma of noise is too small.")
+            return -1.0 # Or np.nan
+        noise_std_eff = sigma_noise
+    
+    if noise_std_eff < 1.0e-6: # Final check if effective noise is too small
+        return -1.0
+
+    return float(DIETRICH_FACTOR * mu_fg / noise_std_eff)
+
+# --- New/Adapted tissue_to_max_intensity_ratio (formerly wm2max) ---
+def tissue_to_max_intensity_ratio(img: np.ndarray, tissue_mask: np.ndarray, percentile_max: float = 99.95) -> float:
+    """
+    Calculates the ratio of the mean intensity within a specific tissue mask
+    to a high percentile of the intensity in the entire image.
+    """
+    if not np.any(tissue_mask):
+        print("WARNING (tissue_to_max_intensity_ratio): tissue_mask is empty.")
+        return -1.0 # Or np.nan
+        
+    tissue_voxels = img[tissue_mask > 0]
+    if tissue_voxels.size == 0:
+        print("WARNING (tissue_to_max_intensity_ratio): No voxels in tissue_mask after indexing img.")
+        return -1.0
+
+    mu_tissue = np.mean(tissue_voxels)
+    
+    if img.size == 0:
+        print("WARNING (tissue_to_max_intensity_ratio): Input image for percentile calculation is empty.")
+        return -1.0
+
+    # Calculate percentile on non-zero voxels to be more robust for masked/cropped images
+    img_non_zero = img[img > 1e-6] # Avoid pure zero background influencing percentile too much
+    if img_non_zero.size < 10: # Need enough voxels for percentile to be meaningful
+        print(f"WARNING (tissue_to_max_intensity_ratio): Very few non-zero voxels ({img_non_zero.size}) in image for percentile calculation. Using simple max instead.")
+        if img.size > 0 :
+            overall_max_intensity = np.max(img) if img.size > 0 else 0.0
+        else: # Should not happen due to earlier check
+            overall_max_intensity = 0.0
+    else:
+        overall_max_intensity = np.percentile(img_non_zero.flatten(), percentile_max)
+
+    if overall_max_intensity < 1e-6:
+        print("WARNING (tissue_to_max_intensity_ratio): Overall max intensity in image is near zero.")
+        return -1.0 # Or handle as per specific needs, e.g., if mu_tissue also ~0, ratio could be 1 or undefined
+        
+    return float(mu_tissue / overall_max_intensity)
+
+# --- New RPVE (Residual Partial Volume Effect) ---
+def rpve_custom(img: np.ndarray, pure_tissue_mask: np.ndarray, pve_interface_mask: np.ndarray) -> float:
+    """
+    Calculates a measure of Residual Partial Volume Effect.
+    RPVE = 1.0 - (mean_intensity_in_pve_interface / mean_intensity_in_pure_tissue)
+    Lower values (closer to 0) are better if interface should be similar to pure.
+    If interface is darker, RPVE can be > 1. If brighter, can be < 0.
+    This definition implies higher intensity in pure_tissue is 'good'.
+    Alternative MRIQC: uses sum(abs(pv_boundary - pv_pure))/sum(pv_pure).
+    Let's use the 1 - ratio formula for now.
+    """
+    if not np.any(pure_tissue_mask) or not np.any(pve_interface_mask):
+        print("WARNING (rpve_custom): Pure tissue mask or PVE interface mask is empty.")
+        return -1.0 # Or np.nan
+
+    pure_voxels = img[pure_tissue_mask > 0]
+    pve_voxels = img[pve_interface_mask > 0]
+
+    if pure_voxels.size == 0 or pve_voxels.size == 0:
+        print("WARNING (rpve_custom): No voxels in pure or PVE mask after indexing image.")
+        return -1.0
+
+    mean_pure = np.mean(pure_voxels)
+    mean_pve = np.mean(pve_voxels)
+
+    if np.abs(mean_pure) < 1e-6: # Avoid division by zero
+        print("WARNING (rpve_custom): Mean intensity of pure tissue is near zero.")
+        # If mean_pve is also near zero, ratio is ill-defined or could be 1 (RPVE=0)
+        # If mean_pve is not zero, RPVE would be largely negative.
+        return -1.0 if np.abs(mean_pve) > 1e-6 else 0.0
+
+    ratio = mean_pve / mean_pure
+    rpve = 1.0 - ratio 
+    # In MRIQC for brain, GM/WM, WM is brighter. PV between them is darker.
+    # mean_PVE < mean_WM -> ratio < 1 -> RPVE > 0.
+    # If lens is darker than surrounding globe tissue (for rpve_globe_interface_with_lens):
+    # pure_globe_tissue (brighter), pve_interface (mix of lens/globe, darker than pure globe).
+    # mean_PVE < mean_pure_globe -> ratio < 1 -> RPVE > 0.
+    # This seems reasonable. Values closer to 0 would mean PVE interface has similar intensity to pure tissue.
+    return float(rpve)
 
 def globe_sphericity(globe_mask_data, voxel_spacing):
     """
@@ -158,6 +298,37 @@ def lens_aspect_ratio(lens_mask_data, voxel_spacing):
         import traceback
         traceback.print_exc()
         return np.nan
+
+def fber(img: np.ndarray, region_mask: np.ndarray, background_mask: np.ndarray, decimals: int = 4) -> float:
+    """
+    Calculates the Foreground-Background Energy Ratio for a specific region.
+    FBER = median_energy(foreground) / median_energy(background)
+    """
+    if not np.any(region_mask):
+        print("WARNING (fber_region): region_mask is empty.")
+        return -2.0 # Indicate specific error for empty foreground
+    if not np.any(background_mask):
+        print("WARNING (fber_region): background_mask is empty.")
+        return -1.0 # Consistent with MRIQC for empty background
+
+    fg_img_values = img[region_mask > 0]
+    bg_img_values = img[background_mask > 0]
+
+    if fg_img_values.size == 0:
+        print("WARNING (fber_region): No voxels in region_mask after indexing img.")
+        return -2.0
+    if bg_img_values.size == 0:
+        print("WARNING (fber_region): No voxels in background_mask after indexing img.")
+        return -1.0
+
+    # Use median of squared absolute values for energy
+    fg_mu = np.median(np.abs(fg_img_values)**2)
+    bg_mu = np.median(np.abs(bg_img_values)**2)
+
+    if bg_mu < 1.0e-6: # Avoid division by zero or extremely small background energy
+        return -1.0 # Or a very large number if fg_mu is substantial, depending on desired behavior
+    return round(float(fg_mu / bg_mu), decimals)
+
 
 def summary_stats(data, pvms, airmask=None, erode=True):
     r"""
