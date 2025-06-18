@@ -1,3 +1,10 @@
+Of course. I have integrated the descriptions of the utility scripts into your README.
+
+I've added a new "Utility Scripts" section for clarity and refined the English descriptions to maintain a consistent tone.
+
+Here is the updated `README.md`:
+
+---
 
 # MReyeQC
 
@@ -74,6 +81,16 @@ Once the IQMs are computed and the ratings have been added, you can train the qu
 To do this, run one of the following Jupyter notebooks, depending on the desired model type:
 * `train_model_MREye_3_models_regression.ipynb`: To train a regression model that predicts a continuous quality score.
 * `train_model_MREye_3_models_binary.ipynb`: To train a classification model that predicts a binary quality label (e.g., "good" vs. "bad").
+
+## Utility Scripts
+
+This project includes several utility scripts to help with data management and analysis.
+
+* `add_new_IQM.py`: Adds IQMs from MRIQC to the `IQA.csv` file.
+* `average_rating.py`: Calculates the average rating from files in the `data/rating` directory and saves the result to `data/bids_csv/rating.csv`.
+* `change_name_to_report_name_83.py`: Updates the 'name' column in the `IQA.csv` file based on mappings from an auxiliary CSV file by extracting a common subject ID.
+* `correlation.py`: Calculates the correlation between the Image Quality Metrics (IQMs) and the manual ratings.
+* `remove_column.py`: Removes specified columns from the `IQA.csv` file.
 
 ## Citation
 > Esteban O, Birman D, Schaer M, Koyejo OO, Poldrack RA, Gorgolewski KJ; MRIQC: Advancing the Automatic Prediction of Image Quality in MRI from Unseen Sites; PLOS ONE 12(9):e0184661; doi:10.1371/journal.pone.0184661.
