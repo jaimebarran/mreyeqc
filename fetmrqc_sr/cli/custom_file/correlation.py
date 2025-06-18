@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np # Import numpy for handling potential NaN issues if necessary
 
 # Load the IQA.csv file
-iqa_file_path = "data/IQA.csv"
+iqa_file_path = "data/IQA_merged.csv"
 
 try:
     df_iqa_full = pd.read_csv(iqa_file_path)

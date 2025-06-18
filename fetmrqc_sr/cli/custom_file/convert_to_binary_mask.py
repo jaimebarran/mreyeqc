@@ -66,7 +66,7 @@ def main():
         print(f"Error: Input directory '{input_seg_base_dir}' not found. Please create it and place your segmentations there or provide a valid path.")
         return
 
-    default_input_seg_pattern = "sub-{subj_id}_mask.nii.gz"
+    default_input_seg_pattern = "sub-{subj_id}_seg.nii.gz"
     input_seg_pattern = input(f"Enter the file name pattern for input segmentations (use '{{subj_id}}' as placeholder for e.g. 001) [{default_input_seg_pattern}]: ") or default_input_seg_pattern
 
     # Output directory as per your request
@@ -91,7 +91,7 @@ def main():
         print(f"Created base output directory: {output_mask_base_dir}")
 
     # Iterate through subjects 001 to 083
-    for i in range(1, 84):
+    for i in range(1, 170):
         subj_id_formatted = f"{i:03d}"  # Formats as "001", "002", ..., "083"
 
         # Construct full input and output file paths

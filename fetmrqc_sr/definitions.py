@@ -52,7 +52,6 @@ IQMS = [
 
     # Signal-to-Noise Ratio (SNR) for each eye tissue
     'seg_snr_LENS', 'seg_snr_GLOBE', 'seg_snr_OPTIQUE_NERVE', 'seg_snr_FAT', 'seg_snr_MUSCLE',
-    'seg_snr_total',
 
     # Contrast-to-Noise Ratio (CNR - Adapted: LENS vs GLOBE)
     'seg_cnr',
@@ -71,15 +70,15 @@ IQMS = [
     # Custom Eye Metrics
     'seg_globe_sphericity', 'seg_lens_aspect_ratio',
     
-    'seg_snr_GLOBE',
-    'seg_cjv',
-    'seg_sstats_GLOBE_mad',
-    'seg_sstats_GLOBE_stdv',
-    'seg_sstats_GLOBE_k',
-    'seg_snr_total',
-    'seg_cnr',
-    'seg_sstats_GLOBE_p95',
-    'centroid_full',
+    # 'seg_snr_GLOBE',
+    # 'seg_cjv',
+    # 'seg_sstats_GLOBE_mad',
+    # 'seg_sstats_GLOBE_stdv',
+    # 'seg_sstats_GLOBE_k',
+    # 'seg_snr_total',
+    # 'seg_cnr',
+    # 'seg_sstats_GLOBE_p95',
+    # 'centroid_full',
 ]
 
 # --- Add _nan versions for all metrics ---

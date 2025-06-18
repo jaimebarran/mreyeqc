@@ -32,63 +32,7 @@ from scipy.stats import chi2, norm
 # MRIQC's Dietrich factor for SNR
 DIETRICH_FACTOR = np.sqrt(2 / (4.0 - np.pi))
 
-# --- New/Adapted FBER ---
-def fber_region(img: np.ndarray, region_mask: np.ndarray, background_mask: np.ndarray, decimals: int = 4) -> float:
-    """
-    Calculates the Foreground-Background Energy Ratio for a specific region.
-    FBER = median_energy(foreground) / median_energy(background)
-    """
-    if not np.any(region_mask):
-        print("WARNING (fber_region): region_mask is empty.")
-        return -2.0 # Indicate specific error for empty foreground
-    if not np.any(background_mask):
-        print("WARNING (fber_region): background_mask is empty.")
-        return -1.0 # Consistent with MRIQC for empty background
 
-    fg_img_values = img[region_mask > 0]
-    bg_img_values = img[background_mask > 0]
-
-    if fg_img_values.size == 0:
-        print("WARNING (fber_region): No voxels in region_mask after indexing img.")
-        return -2.0
-    if bg_img_values.size == 0:
-        print("WARNING (fber_region): No voxels in background_mask after indexing img.")
-        return -1.0
-
-    # Use median of squared absolute values for energy
-    fg_mu = np.median(np.abs(fg_img_values)**2)
-    bg_mu = np.median(np.abs(bg_img_values)**2)
-
-    if bg_mu < 1.0e-6: # Avoid division by zero or extremely small background energy
-        return -1.0 # Or a very large number if fg_mu is substantial, depending on desired behavior
-    return round(float(fg_mu / bg_mu), decimals)
-
-# --- New/Adapted SNR Dietrich ---
-def snr_dietrich_val(mu_fg: float, sigma_noise: float, mad_noise: float = -1.0) -> float:
-    """
-    Calculates Dietrich SNR using pre-calculated foreground mean and noise std/mad.
-    Uses MAD if valid (>=0), otherwise sigma_noise.
-    """
-    if mad_noise >= 0.0: # Prefer MAD if available and valid
-        if mad_noise < 1.0e-6: # Check if MAD is too small
-            # Fallback to sigma_noise if MAD is extremely small but sigma_noise might be more robust
-            if sigma_noise < 1.0e-6:
-                print("WARNING (snr_dietrich_val): Both MAD and Sigma of noise are too small.")
-                return -1.0 # Or np.nan
-            print("WARNING (snr_dietrich_val): MAD of noise is very small, using Sigma.")
-            noise_std_eff = sigma_noise
-        else:
-            noise_std_eff = mad_noise # Dietrich original uses MAD for robustness
-    else: # Fallback to sigma_noise if MAD is not provided or invalid
-        if sigma_noise < 1.0e-6:
-            print("WARNING (snr_dietrich_val): Sigma of noise is too small.")
-            return -1.0 # Or np.nan
-        noise_std_eff = sigma_noise
-    
-    if noise_std_eff < 1.0e-6: # Final check if effective noise is too small
-        return -1.0
-
-    return float(DIETRICH_FACTOR * mu_fg / noise_std_eff)
 
 # --- New/Adapted tissue_to_max_intensity_ratio (formerly wm2max) ---
 def tissue_to_max_intensity_ratio(img: np.ndarray, tissue_mask: np.ndarray, percentile_max: float = 99.95) -> float:
@@ -298,36 +242,6 @@ def lens_aspect_ratio(lens_mask_data, voxel_spacing):
         import traceback
         traceback.print_exc()
         return np.nan
-
-def fber(img: np.ndarray, region_mask: np.ndarray, background_mask: np.ndarray, decimals: int = 4) -> float:
-    """
-    Calculates the Foreground-Background Energy Ratio for a specific region.
-    FBER = median_energy(foreground) / median_energy(background)
-    """
-    if not np.any(region_mask):
-        print("WARNING (fber_region): region_mask is empty.")
-        return -2.0 # Indicate specific error for empty foreground
-    if not np.any(background_mask):
-        print("WARNING (fber_region): background_mask is empty.")
-        return -1.0 # Consistent with MRIQC for empty background
-
-    fg_img_values = img[region_mask > 0]
-    bg_img_values = img[background_mask > 0]
-
-    if fg_img_values.size == 0:
-        print("WARNING (fber_region): No voxels in region_mask after indexing img.")
-        return -2.0
-    if bg_img_values.size == 0:
-        print("WARNING (fber_region): No voxels in background_mask after indexing img.")
-        return -1.0
-
-    # Use median of squared absolute values for energy
-    fg_mu = np.median(np.abs(fg_img_values)**2)
-    bg_mu = np.median(np.abs(bg_img_values)**2)
-
-    if bg_mu < 1.0e-6: # Avoid division by zero or extremely small background energy
-        return -1.0 # Or a very large number if fg_mu is substantial, depending on desired behavior
-    return round(float(fg_mu / bg_mu), decimals)
 
 
 def summary_stats(data, pvms, airmask=None, erode=True):

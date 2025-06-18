@@ -1,96 +1,40 @@
-Of course. I have integrated the descriptions of the utility scripts into your README.
+# FetMRQC SR
 
-I've added a new "Utility Scripts" section for clarity and refined the English descriptions to maintain a consistent tone.
+FetMRQC SR is the super-resolution extension of FetMRQC [[paper1](https://arxiv.org/pdf/2304.05879.pdf),[paper2](https://arxiv.org/pdf/2311.04780.pdf)]. It is a tool for quality assessment (QA) and quality control (QC) of super-resolution reconstructed (SRR) fetal brain MR images. 
 
-Here is the updated `README.md`:
+Given a list of SRR images listed using `qc_list_bids`, it then uses `srqc_segmentation` to compute the segmentations using BOUNTI [1] and extracts image quality metrics (IQMs) using `srqc_compute_iqms`. These IQMs can then be transformed in FetMRQC SR predictions using `srqc_inference`.
 
----
+If you have found this useful in your research, please cite 
+> Thomas Sanchez, Vladyslav Zalevskyi, Angeline Mihailov, Gerard Martí-Juan, Elisenda Eixarch, Andras Jakab, Vincent Dunet, Mériam Koob, Guillaume Auzias, Meritxell Bach Cuadra. (2025) **Automatic quality control in multi-centric fetal brain MRI super-resolution reconstruction.** [arXiv preprint arXiv:2503.10156](https://www.arxiv.org/abs/2503.10156)
 
-# MReyeQC
+## Installing FetMRQC_SR
+To install FetMRQC SR, just create a new `conda` environment with python 3.9.10
 
-MReyeQC is a tool for creating a regression model to predict the quality of eye MRI images. This project is inspired by and based on the [MRIQC](https://mriqc.readthedocs.io/) framework.
-
-The main workflow consists of:
-1.  Preprocessing a dataset of ocular MRI images and their segmentations.
-2.  Computing a set of Image Quality Metrics (IQMs) using MRIQC tools.
-3.  Training models (either regression or binary classification) to predict an image's quality from its IQMs.
-
-## Installation
-
-To install MReyeQC, start by creating a new `conda` environment. Python 3.9 is recommended.
-
-```bash
-conda create --name MReyeQC python=3.9
-conda activate MReyeQC
+```
+conda TODO
 ```
 
-Then, install the project and its dependencies by cloning this repository and running:
-```bash
-pip install -e .
+Then, simply install the environemnt and its dependencies by running `pip install -e .`
+
+## Custom model training using FetMRQC SR
+You can train your custom random forest model to predict from a given list of IQMs and using your own data. This can be done by the following steps.
+
+1. Given a [BIDS-formatted](https://bids.neuroimaging.io/index.html) dataset, get a CSV list of the data with `qc_list_bids` (use `--help` to see the detail). You will need to use the option `--skip_masks`.
+2. Once you have your csv file, you can generate the visual reports for manual annotations using  
 ```
+qc_generate_reports --bids_csv <csv_path> --out_dir <output_directory> --sr
+```
+3. You can then run `qc_generate_index` to generate an index file to easily navigate the reports.
+4. Once your ratings are done, you can get back a CSV file using `qc_ratings_to_csv`
+5. You can then compute brain segmentations using `srqc_segmentation` and IQMs using `srqc_compute_iqms`. 
+6. You will then have everything that you need to train your custom models: manual ratings with automatically extracted IQMs. Using `srqc_train_model`, you will then be able to train your own model.
 
-## Usage
+## References
+[1] Uus, Alena U., et al. "BOUNTI: Brain vOlumetry and aUtomated parcellatioN for 3D feTal MRI." bioRxiv (2023).
 
-### 1. Adding Data and Computing IQMs
+## License
+Copyright 2025 Medical Image Analysis Laboratory. 
 
-This section describes the steps required to add new images to the dataset, preprocess them, and compute the Image Quality Metrics (IQMs).
+## Acknowledgements
+This project was supported by the ERA-net Neuron MULTIFACT – SNSF grant [31NE30_203977](https://data.snf.ch/grants/grant/203977).
 
-1.  **Add Images**
-    Place your MRI images in NIfTI format into the `data/img/` directory.
-
-2.  **Index New Images**
-    Run the `add_new_img.py` script. This script prepares the new data for the subsequent steps.
-    **Warning**: Do not run this script twice in a row, as it deletes tracking columns that are only generated on the first run.
-
-3.  **Prepare Segmentation Masks**
-    Run the following scripts sequentially to generate and format the binary masks required for IQM calculation:
-    * `add_new_seg.py`
-    * `convert_to_binary_mask.py`
-
-4.  **Generate BIDS List**
-    Use the `qc_list_bids_csv` command to create a CSV file listing your images and their corresponding masks. Replace `<path_to_project>` with the absolute path to the project's root directory.
-
-    ```bash
-    qc_list_bids_csv \
-        --bids_dir "<path_to_project>/data/img" \
-        --mask_patterns_base "<path_to_project>/data/mask" \
-        --mask_patterns "sub-{subject}_mask.nii.gz" \
-        --out_csv "<path_to_project>/data/bids_csv/bids_csv.csv" \
-        --suffix T1w \
-        --no-anonymize_name
-    ```
-
-5.  **Add Ratings**
-    Run the following scripts to integrate the quality ratings (manual or existing) into the CSV file:
-    * `add_average_rating_to_bids.py`
-    * `add_new_rating.py`
-
-6.  **Compute IQMs**
-    Finally, run the `srqc_compute_iqms` command to extract the quality metrics from the images and masks. The output will be saved to `IQA.csv`.
-
-    ```bash
-    srqc_compute_iqms \
-        --bids_csv "<path_to_project>/data/bids_csv/bids_csv_rating.csv" \
-        --out_csv "<path_to_project>/data/IQA.csv"
-    ```
-
-### 2. Model Training
-
-Once the IQMs are computed and the ratings have been added, you can train the quality prediction models.
-
-To do this, run one of the following Jupyter notebooks, depending on the desired model type:
-* `train_model_MREye_3_models_regression.ipynb`: To train a regression model that predicts a continuous quality score.
-* `train_model_MREye_3_models_binary.ipynb`: To train a classification model that predicts a binary quality label (e.g., "good" vs. "bad").
-
-## Utility Scripts
-
-This project includes several utility scripts to help with data management and analysis.
-
-* `add_new_IQM.py`: Adds IQMs from MRIQC to the `IQA.csv` file.
-* `average_rating.py`: Calculates the average rating from files in the `data/rating` directory and saves the result to `data/bids_csv/rating.csv`.
-* `change_name_to_report_name_83.py`: Updates the 'name' column in the `IQA.csv` file based on mappings from an auxiliary CSV file by extracting a common subject ID.
-* `correlation.py`: Calculates the correlation between the Image Quality Metrics (IQMs) and the manual ratings.
-* `remove_column.py`: Removes specified columns from the `IQA.csv` file.
-
-## Citation
-> Esteban O, Birman D, Schaer M, Koyejo OO, Poldrack RA, Gorgolewski KJ; MRIQC: Advancing the Automatic Prediction of Image Quality in MRI from Unseen Sites; PLOS ONE 12(9):e0184661; doi:10.1371/journal.pone.0184661.
