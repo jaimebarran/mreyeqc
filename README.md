@@ -1,14 +1,6 @@
-Of course. I have integrated the descriptions of the utility scripts into your README.
-
-I've added a new "Utility Scripts" section for clarity and refined the English descriptions to maintain a consistent tone.
-
-Here is the updated `README.md`:
-
----
-
 # MReyeQC
 
-MReyeQC is a tool for creating a regression model to predict the quality of eye MRI images. This project is inspired by and based on the [MRIQC](https://mriqc.readthedocs.io/) framework.
+MReyeQC is a tool for creating a regression model to predict the quality of eye MRI images. This project is inspired by and based on [FetMRQC](https://github.com/Medical-Image-Analysis-Laboratory/fetmrqc) and [MRIQC](https://mriqc.readthedocs.io/) frameworks.
 
 The main workflow consists of:
 1.  Preprocessing a dataset of ocular MRI images and their segmentations.
