@@ -85,4 +85,6 @@ This project includes several utility scripts to help with data management and a
 * `remove_column.py`: Removes specified columns from the `IQA.csv` file.
 
 ## Citation
+> Sanchez, T., Esteban, O., Gomez, Y., Eixarch, E., Bach Cuadra, M. (2023). "FetMRQC: Automated Quality Control for Fetal Brain MRI." PIPPI MICCAI Workshop 2023. https://doi.org/10.1007/978-3-031-45544-5_1
+
 > Esteban O, Birman D, Schaer M, Koyejo OO, Poldrack RA, Gorgolewski KJ; MRIQC: Advancing the Automatic Prediction of Image Quality in MRI from Unseen Sites; PLOS ONE 12(9):e0184661; doi:10.1371/journal.pone.0184661.
