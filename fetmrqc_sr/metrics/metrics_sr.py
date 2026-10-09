@@ -64,26 +64,28 @@ from statsmodels import robust
 
 SKIMAGE_FCT = [fct for _, fct in getmembers(skimage.filters, isfunction)]
 
+# Target labels start at 1: load_and_format_seg remaps into a zero-filled array,
+# so 0 is background and must not be used for a tissue.
 SEGM = {
-    "LENS":             0,
-    "GLOBE":            1,
-    "OPTIQUE_NERVE":    2,
-    "FAT":              3,
-    "MUSCLE":           4,
+    "LENS":             1,
+    "GLOBE":            2,
+    "OPTIQUE_NERVE":    3,
+    "FAT":              4,
+    "MUSCLE":           5,
 }
 segm_names = list(SEGM.keys())
 
 EYE_MAP_SEG = [
-    None, # Index 0: Raw Label 0 (Background) -> Ignore
-    0,    # Index 1: Raw Label 1 (LENS)       -> Target 0 (LENS)
-    1,    # Index 2: Raw Label 2 (GLOBE)      -> Target 1 (GLOBE)
-    2,    # Index 3: Raw Label 3 (NERVE)      -> Target 2 (OPTIQUE_NERVE)
-    3,    # Index 4: Raw Label 4 (FAT)        -> Target 3 (FAT)
-    3,    # Index 5: Raw Label 5 (FAT)        -> Target 3 (FAT)
-    4,    # Index 6: Raw Label 6 (MUSCLE)     -> Target 4 (MUSCLE)
-    4,    # Index 7: Raw Label 7 (MUSCLE)     -> Target 4 (MUSCLE)
-    4,    # Index 8: Raw Label 8 (MUSCLE)     -> Target 4 (MUSCLE)
-    4,    # Index 9: Raw Label 9 (MUSCLE)     -> Target 4 (MUSCLE)
+    None, # Index 0: Raw Label 0 (Background) -> Ignore (stays 0)
+    1,    # Index 1: Raw Label 1 (LENS)       -> Target 1 (LENS)
+    2,    # Index 2: Raw Label 2 (GLOBE)      -> Target 2 (GLOBE)
+    3,    # Index 3: Raw Label 3 (NERVE)      -> Target 3 (OPTIQUE_NERVE)
+    4,    # Index 4: Raw Label 4 (FAT)        -> Target 4 (FAT)
+    4,    # Index 5: Raw Label 5 (FAT)        -> Target 4 (FAT)
+    5,    # Index 6: Raw Label 6 (MUSCLE)     -> Target 5 (MUSCLE)
+    5,    # Index 7: Raw Label 7 (MUSCLE)     -> Target 5 (MUSCLE)
+    5,    # Index 8: Raw Label 8 (MUSCLE)     -> Target 5 (MUSCLE)
+    5,    # Index 9: Raw Label 9 (MUSCLE)     -> Target 5 (MUSCLE)
 ]
 
 
